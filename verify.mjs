@@ -18,6 +18,7 @@ const checks = [
   ,['REA 크레딧', app.includes('credit') || app.includes('크레딧')]
   ,['REA 생성 도구', ['이미지','영상','배경음악','음향효과','목소리'].every(label => app.includes(label))]
   ,['REA 샘플 진입', app.includes('sampleBtn') && app.includes('샘플')]
+  ,['편집기 이벤트 ID', /id="backStudio"/.test(await readFile(new URL('./index.html', import.meta.url), 'utf8')) && app.includes("$('#backStudio').addEventListener")]
 ];
 const failed = checks.filter(([, ok]) => !ok);
 for (const [name, ok] of checks) console.log(`${ok ? 'PASS' : 'FAIL'} ${name}`);

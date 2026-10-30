@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SkyClip — AI 숏폼 스튜디오</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand"><span class="brand-mark">✦</span><span>SkyClip</span></div>
+      <div class="workspace-switcher"><span class="workspace-dot"></span><span>스튜디오 작업공간</span><span class="chevron">⌄</span></div>
+      <nav class="nav">
+        <button class="nav-item active" data-view="studio"><span>⌁</span> 스튜디오</button>
+        <button class="nav-item" data-view="projects"><span>▦</span> 프로젝트 <b>6</b></button>
+        <button class="nav-item" data-view="templates"><span>◈</span> 템플릿</button>
+        <button class="nav-item" data-view="assets"><span>◌</span> 에셋 보관함</button>
+      </nav>
+      <div class="sidebar-label">최근 프로젝트</div>
+      <div class="recent-list">
+        <button class="recent"><span class="thumb t1"></span><span><strong>Midnight ramen</strong><small>12분 전 수정</small></span></button>
+        <button class="recent"><span class="thumb t2"></span><span><strong>Creator notes #04</strong><small>어제 수정</small></span></button>
+        <button class="recent"><span class="thumb t3"></span><span><strong>Seoul street food</strong><small>3일 전 수정</small></span></button>
+      </div>
+      <div class="sidebar-bottom"><button class="help">? <span>도움말 센터</span></button><div class="profile"><span class="avatar">SK</span><span><strong>스튜디오 운영자</strong><small>프로 요금제</small></span><span class="chevron">⌄</span></div></div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar"><div class="breadcrumb"><span>스튜디오</span><i>/</i><strong id="crumbTitle">새 프로젝트</strong></div><div class="top-actions"><span class="save-status"><span class="green-dot"></span> 모든 변경사항 저장됨</span><button class="icon-btn">⌘ K</button><button class="avatar small">SK</button></div></header>
+
+      <section id="studioView" class="view active-view">
+        <div class="studio-head"><div><p class="eyebrow">AI 숏폼 작업공간</p><h1>다음 영상을 <em>멋진 순간으로.</em></h1><p class="subhead">긴 영상을 모든 채널용 숏폼으로 바꿔보세요.</p></div><button class="primary" id="newProjectBtn">＋ 새 프로젝트</button></div>
+        <div class="hero-grid">
+          <div class="upload-panel">
+            <div class="upload-icon">↑</div><h2>영상에 생명을 불어넣으세요</h2><p>영상을 놓거나 링크를 붙여 넣거나 빈 캔버스에서 시작하세요.</p>
+            <div class="input-row"><input id="sourceInput" placeholder="유튜브 또는 영상 링크를 붙여 넣으세요…"/><button id="analyzeBtn" class="primary">분석하기</button></div>
+            <div class="dropzone" id="dropzone"><span>⌘</span><strong>영상을 여기에 놓으세요</strong><small>MP4, MOV 최대 4GB</small><button id="browseBtn" class="text-btn">파일 찾아보기</button><input id="fileInput" type="file" accept="video/mp4,video/quicktime,video/webm" hidden /></div>
+            <div class="or"><span></span>또는 샘플 영상 사용<span></span></div><button class="sample" id="sampleBtn"><span class="sample-thumb"></span><span><strong>시티 나이트 — 크리에이터 샘플</strong><small>04:18 · 4K · 영어</small></span><span class="arrow">↗</span></button>
+          </div>
+          <div class="recent-panel"><div class="panel-heading"><div><p class="eyebrow">계속 만들기</p><h2>내 프로젝트</h2></div><button class="text-btn" data-view="projects">전체 보기 →</button></div><div class="project-grid"><article class="project-card featured"><div class="project-image t1"><span class="project-badge">진행 중</span><button class="play">▶</button></div><div class="project-meta"><strong>Midnight ramen</strong><span>9:16 · 00:37</span></div><div class="progress"><i style="width: 64%"></i></div></article><article class="project-card"><div class="project-image t2"><span class="project-badge muted">초안</span><button class="play">▶</button></div><div class="project-meta"><strong>Creator notes #04</strong><span>9:16 · 01:02</span></div></article><article class="project-card"><div class="project-image t3"><span class="project-badge muted">초안</span><button class="play">▶</button></div><div class="project-meta"><strong>Seoul street food</strong><span>9:16 · 00:24</span></div></article></div></div>
+        </div>
+        <div class="studio-footer"><div class="footer-stat"><span class="stat-icon purple">✦</span><span><strong>AI가 준비되었습니다</strong><small>자동 컷, 자막, 후킹, 화면 재구성을 한 번에 처리합니다.</small></span></div><div class="footer-stat"><span class="stat-icon orange">◷</span><span><strong>검토 중인 프로젝트 3개</strong><small>중단한 지점에서 계속하세요.</small></span></div><div class="footer-stat"><span class="stat-icon blue">↗</span><span><strong>모든 채널로 내보내기</strong><small>세로, 정사각형, 가로 형식을 지원합니다.</small></span></div></div>
+      </section>
+
+      <section id="editorView" class="view editor-view">
+        <div class="editor-toolbar"><div><p class="eyebrow">PROJECT / MIDNIGHT RAMEN</p><h1>Midnight ramen</h1></div><div class="editor-actions"><button class="ghost" id="back스튜디오">← 뒤로</button><button class="ghost">공유</button><button class="primary" id="exportBtn">영상 내보내기 <span>↗</span></button></div></div>
+        <div class="editor-layout">
+          <section class="canvas-column"><div class="video-stage" id="videoStage"><video id="videoPreview" playsinline></video><div class="video-glow"></div><div class="video-copy"><span class="video-tag">SEOUL · <b id="currentTime">00:18</b></span><h2>The broth<br/><span>knows.</span></h2><p id="videoLabel">midnight ramen diary</p></div><button class="stage-play" id="playBtn">▶</button><div class="stage-controls"><span id="stageCurrent">00:18</span><div class="stage-track"><i id="stageProgress"></i></div><span id="stageDuration">00:37</span><button>⌗</button><button>⛶</button></div></div><div class="timeline-head"><span>장면 타임라인</span><div><button class="timeline-action" id="cutBtn">✂ 자르기</button><button class="timeline-action" id="add자르기Btn">＋ 추가</button><button class="timeline-action">↶</button><button class="timeline-action">↷</button></div></div><div class="timeline"><div class="ruler"><span>00:00</span><span>00:10</span><span>00:20</span><span>00:30</span><span>00:37</span></div><div class="track-row"><div class="track-label">영상</div><div class="clip-row"><span class="clip c1"></span><span class="clip c2 selected"></span><span class="clip c3"></span><span class="clip c4"></span></div></div><div class="track-row"><div class="track-label">자막</div><div class="caption-row"><span>the broth</span><span>knows.</span><span>one late-night bowl</span></div></div><div class="playhead" id="playhead"></div></div></section>
+          <aside class="inspector"><div class="inspector-tabs"><button class="inspector-tab active" data-panel="script">Script</button><button class="inspector-tab" data-panel="captions">Captions</button><button class="inspector-tab" data-panel="audio">오디오</button></div><div id="scriptPanel" class="inspector-panel active"><div class="panel-title"><div><p class="eyebrow">대본</p><h2>단어 단위 편집</h2></div><button class="more">•••</button></div><p class="hint">단어를 클릭하면 이동하고 삭제하면 장면이 잘립니다.</p><div class="transcript"><p data-time="00:03">At <span>midnight</span>, the city is quiet but this little kitchen is wide awake.</p><p data-time="00:09">The <span class="active-word">broth</span> knows exactly what to do. Slow heat, deep flavor.</p><p data-time="00:16">One late-night bowl, and suddenly the whole day makes sense.</p></div><button class="secondary full" id="regenBtn">✦ 자막 다시 생성</button><div class="style-section"><div class="panel-title"><h3>후킹 제목</h3><button class="text-btn">생성 ✦</button></div><div class="title-option active"><strong>The broth knows.</strong><span>미니멀 · 9:16</span><b>✓</b></div><div class="title-option"><strong>Best ramen after dark</strong><span>볼드 · 9:16</span><b>＋</b></div></div></div><div id="captionsPanel" class="inspector-panel"><div class="panel-title"><div><p class="eyebrow">자막 스타일</p><h2>자막을 움직이게</h2></div></div><div class="caption-style-grid"><button class="style-chip active">기본</button><button class="style-chip">바운스</button><button class="style-chip">노래방</button><button class="style-chip">팝</button></div><div class="color-row"><span>텍스트 색상</span><span class="color-dot white"></span><span class="color-dot purple-dot"></span><span class="color-dot yellow"></span></div></div><div id="audioPanel" class="inspector-panel"><div class="panel-title"><div><p class="eyebrow">사운드트랙</p><h2>분위기 찾기</h2></div></div><div class="audio-item active"><span>♫</span><div><strong>Moonlit windows</strong><small>Lo-fi · 02:14</small></div><button>✓</button></div><div class="audio-item"><span>♫</span><div><strong>Neon after rain</strong><small>Ambient · 01:58</small></div><button>＋</button></div><div class="audio-item"><span>♫</span><div><strong>Side street stories</strong><small>Chill · 02:38</small></div><button>＋</button></div></div></aside>
+        </div>
+      </section>
+      <section id="projectsView" class="view simple-view"><div class="simple-head"><div><p class="eyebrow">LIBRARY</p><h1>프로젝트</h1><p>Every cut, in one calm place.</p></div><button class="primary" id="newProjectBtn2">＋ 새 프로젝트</button></div><div class="library-list"><div class="library-header"><span>PROJECT</span><span>STATUS</span><span>LAST EDITED</span><span>FORMAT</span><span></span></div><button class="library-row open-project"><span><span class="mini-thumb t1"></span><strong>Midnight ramen</strong></span><span class="status progress-status">진행 중</span><span>12 min ago</span><span>9:16 · 00:37</span><span>↗</span></button><button class="library-row open-project"><span><span class="mini-thumb t2"></span><strong>Creator notes #04</strong></span><span class="status draft-status">초안</span><span>Yesterday</span><span>9:16 · 01:02</span><span>↗</span></button><button class="library-row open-project"><span><span class="mini-thumb t3"></span><strong>Seoul street food</strong></span><span class="status draft-status">초안</span><span>3 days ago</span><span>9:16 · 00:24</span><span>↗</span></button></div></section>
+      <section id="templatesView" class="view simple-view"><div class="simple-head"><div><p class="eyebrow">스타터 시스템</p><h1>템플릿</h1><p>모든 이야기에 나만의 스타일을 더하세요.</p></div></div><div class="template-grid"><button class="template-card template-a"><span>01 / Bold hook</span><strong>Make them<br/>stop scrolling.</strong><small>High contrast · 9:16</small></button><button class="template-card template-b"><span>02 / Editorial</span><strong>A little<br/>closer.</strong><small>Soft type · 9:16</small></button><button class="template-card template-c"><span>03 / Fast cut</span><strong>Now<br/>watch this.</strong><small>Dynamic · 9:16</small></button></div></section>
+      <section id="assetsView" class="view simple-view"><div class="simple-head"><div><p class="eyebrow">내 보관함</p><h1>에셋 보관함</h1><p>오디오, fonts, and saved visual ingredients.</p></div><button class="primary">＋ 에셋 업로드</button></div><div class="asset-list"><div class="asset-row"><span class="asset-icon purple-bg">♫</span><span><strong>Moonlit windows</strong><small>오디오 · 02:14</small></span><span>Used in 2 projects</span><button>•••</button></div><div class="asset-row"><span class="asset-icon orange-bg">Aa</span><span><strong>Space Grotesk</strong><small>글꼴 · 디스플레이</small></span><span>Saved style</span><button>•••</button></div><div class="asset-row"><span class="asset-icon blue-bg">▧</span><span><strong>Creator logo kit</strong><small>Brand pack · 8 items</small></span><span>Uploaded Oct 21</span><button>•••</button></div></div></section>
+    </main>
+  </div>
+  <div id="toast" class="toast"></div>
+  <script src="app.js"></script>
+</body>
+</html>

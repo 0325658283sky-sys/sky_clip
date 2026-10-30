@@ -1,0 +1,14 @@
+{
+  "name": "skyclip",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs",
+    "start:api": "node server.mjs",
+    "qa": "npm run check && npm run verify",
+    "check": "node --check app.js && node --check server.mjs && node --check render.mjs",
+    "render": "node render.mjs",
+    "verify": "node verify.mjs",
+    "verify:api": "node verify-api.mjs"
+  }
+}

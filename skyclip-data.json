@@ -1,0 +1,32 @@
+{
+  "creditBalance": 290,
+  "projects": [
+    {
+      "id": "d762a06f-b6c2-4bb4-a070-79b4d1a92f97",
+      "title": "www.youtube.com",
+      "source": "https://www.youtube.com/watch?v=d5m-ChYBnyA",
+      "creditCost": 10,
+      "status": "ready",
+      "progress": 100,
+      "logs": [
+        {
+          "message": "프로젝트 생성 요청을 받았습니다.",
+          "at": "2026-10-29T05:35:01.006Z"
+        },
+        {
+          "message": "AI 분석을 시작했습니다.",
+          "at": "2026-10-29T05:35:01.258Z"
+        },
+        {
+          "message": "하이라이트와 자막 후보를 분석 중입니다.",
+          "at": "2026-10-29T05:35:01.613Z"
+        },
+        {
+          "message": "분석이 완료되었습니다.",
+          "at": "2026-10-29T05:35:01.920Z"
+        }
+      ],
+      "createdAt": "2026-10-29T05:35:01.006Z"
+    }
+  ]
+}

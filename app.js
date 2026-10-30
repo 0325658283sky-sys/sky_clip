@@ -131,6 +131,17 @@ $('#sampleBtn')?.addEventListener('click',event=>{event.preventDefault();openRes
 $('#backResultsStudio')?.addEventListener('click',()=>{document.querySelectorAll('.view').forEach(item=>item.classList.remove('active-view'));$('#studioView').classList.add('active-view');$('#crumbTitle').textContent='새 프로젝트'});
 $('#editSelectedClip')?.addEventListener('click',()=>{document.querySelectorAll('.view').forEach(item=>item.classList.remove('active-view'));$('#editorView').classList.add('active-view');$('#crumbTitle').textContent=$('#resultTitle')?.textContent||'선택한 클립';toast('선택한 클립을 편집기로 열었습니다.')});
 $('#expandResultCaption')?.addEventListener('click',event=>{const caption=$('#resultCaption');caption.classList.toggle('expanded');event.currentTarget.textContent=caption.classList.contains('expanded')?'접기':'더보기'});
+
+const legacyOpenResults=openResults;
+openResults=async function(){
+  if(projectState.id){
+    try{const response=await fetch(`${API_BASE}/api/projects/${projectState.id}/results`);if(response.ok){const payload=await response.json();const clips=payload.resultSet?.clips;if(Array.isArray(clips)&&clips.length){resultClips.splice(0,resultClips.length,...clips.map(clip=>({title:clip.title,duration:clip.duration,score:clip.viralScore,subtitle:clip.subtitleText,reason:clip.scoreReason})));}}
+    }catch(error){console.info('결과 API 연결 전 기본 결과를 사용합니다.')} 
+  }
+  legacyOpenResults();
+};
+const legacyOpenEditor=openEditor;
+openEditor=async function(){if(projectState.id){await openResults();return}return legacyOpenEditor()};
 const koreanUi={'Studio':'스튜디오','New project':'새 프로젝트','All changes saved':'모든 변경사항 저장됨','AI SHORTFORM WORKSPACE':'AI 숏폼 작업공간','Make your next ':'다음 영상을 ','moment.':'멋진 순간으로.','Turn long videos into scroll-stopping shortform, ready for every channel.':'긴 영상을 모든 채널용 숏폼으로 바꿔보세요.','Bring a video to life':'영상에 생명을 불어넣으세요','Drop your video here':'영상을 여기에 놓으세요','MP4, MOV up to 4GB':'MP4, MOV 최대 4GB','Browse files':'파일 찾아보기','or try a sample':'또는 샘플 영상 사용','City nights — creator sample':'시티 나이트 — 크리에이터 샘플','Your projects':'내 프로젝트','View all →':'전체 보기 →','In progress':'진행 중','Draft':'초안','CONTINUE CREATING':'계속 만들기','AI is ready when you are':'AI가 준비되었습니다','Auto-cut, captions, hooks, and reframing in one flow.':'자동 컷, 자막, 후킹, 화면 재구성을 한 번에 처리합니다.','3 projects in review':'검토 중인 프로젝트 3개','Pick up where you left off.':'중단한 지점에서 계속하세요.','Export to every channel':'모든 채널로 내보내기','Vertical, square, or landscape.':'세로, 정사각형, 가로 형식을 지원합니다.','Analyze':'분석하기'};document.querySelectorAll('body *').forEach(el=>{if(el.children.length===0){const t=el.textContent.trim();if(koreanUi[t])el.textContent=koreanUi[t]}});
 const koreanWalker=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT);while(koreanWalker.nextNode()){const node=koreanWalker.currentNode;const raw=node.nodeValue.trim();if(koreanUi[raw])node.nodeValue=node.nodeValue.replace(raw,koreanUi[raw])}
 

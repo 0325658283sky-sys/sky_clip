@@ -22,6 +22,17 @@ try {
 }
 const persist = () => writeFile(dataFile, JSON.stringify({ creditBalance, projects: [...projects.values()] }, null, 2), 'utf8').catch(() => {});
 const logProject = (id, message) => { const project = projects.get(id); if (!project) return; projects.set(id, { ...project, logs: [...(project.logs || []), { message, at: new Date().toISOString() }] }); persist(); };
+const buildResultClips = (project) => {
+  const sourceLabel = project.source ? '분석 영상' : '새 프로젝트';
+  return [
+    { id: `${project.id}-clip-01`, title: `${sourceLabel}의 핵심 장면`, duration: '00:50', viralScore: 99, scoreReason: '강렬한 시작과 명확한 문제 의식이 있어 짧은 영상에서도 메시지가 빠르게 전달됩니다.', subtitleText: '핵심 메시지가 시작부터 선명하게 전달되는 추천 클립입니다.', start: 0, end: 50 },
+    { id: `${project.id}-clip-02`, title: '가장 중요한 반전이 나오는 순간', duration: '00:43', viralScore: 98, scoreReason: '대상과 반전이 분명해 초반 이탈을 줄일 수 있는 클립입니다.', subtitleText: '시청자가 다음 내용을 궁금해하도록 만드는 전환 구간입니다.', start: 50, end: 93 },
+    { id: `${project.id}-clip-03`, title: '짧고 강한 한 문장', duration: '00:40', viralScore: 97, scoreReason: '짧고 독립적인 문장으로 구성돼 빠른 소비에 적합합니다.', subtitleText: '짧은 문장 하나로 주제를 이해할 수 있는 구간입니다.', start: 93, end: 133 },
+    { id: `${project.id}-clip-04`, title: '공감을 만드는 설명', duration: '00:50', viralScore: 96, scoreReason: '공감과 궁금증을 동시에 만드는 설명형 클립입니다.', subtitleText: '상황 설명과 감정선이 자연스럽게 이어지는 구간입니다.', start: 133, end: 183 },
+    { id: `${project.id}-clip-05`, title: '비교로 이해하는 핵심 내용', duration: '00:52', viralScore: 95, scoreReason: '비교 구조가 명확해 정보 전달형 숏폼으로 적합합니다.', subtitleText: '서로 다른 사례를 비교해 핵심을 쉽게 이해시키는 구간입니다.', start: 183, end: 235 },
+    { id: `${project.id}-clip-06`, title: '마무리 메시지', duration: '00:48', viralScore: 94, scoreReason: '감정적 긴장감이 높아 후킹 제목과 함께 사용하기 좋습니다.', subtitleText: '영상 전체의 문제 의식을 짧게 정리하는 마무리 구간입니다.', start: 235, end: 283 }
+  ];
+};
 const json = (res, status, body) => {
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'access-control-allow-origin': '*' });
   res.end(JSON.stringify(body));
@@ -52,10 +63,17 @@ const server = createServer(async (req, res) => {
     persist();
     setTimeout(() => { logProject(project.id, 'AI 분석을 시작했습니다.'); const current = projects.get(project.id); if (current) { projects.set(project.id, { ...current, status: 'processing', progress: 35 }); persist(); } }, 250);
     setTimeout(() => { logProject(project.id, '하이라이트와 자막 후보를 분석 중입니다.'); const current = projects.get(project.id); if (current) { projects.set(project.id, { ...current, status: 'processing', progress: 72 }); persist(); } }, 600);
-    setTimeout(() => { logProject(project.id, '분석이 완료되었습니다.'); const current = projects.get(project.id); if (current) { projects.set(project.id, { ...current, status: 'ready', progress: 100 }); persist(); } }, 900);
+    setTimeout(() => { logProject(project.id, '분석이 완료되었습니다.'); const current = projects.get(project.id); if (current) { projects.set(project.id, { ...current, status: 'ready', progress: 100, resultSet: { sourceVideo: { title: current.title, source: current.source }, clips: buildResultClips(current) } }); persist(); } }, 900);
     return json(res, 201, project);
   }
   const match = url.pathname.match(/^\/api\/projects\/([^/]+)$/);
+  const resultsJob = url.pathname.match(/^\/api\/projects\/([^/]+)\/results$/);
+  if (req.method === 'GET' && resultsJob) {
+    const project = projects.get(resultsJob[1]);
+    if (!project) return json(res, 404, { error: '프로젝트를 찾을 수 없습니다.' });
+    const resultSet = project.resultSet || { sourceVideo: { title: project.title, source: project.source }, clips: buildResultClips(project) };
+    return json(res, 200, { projectId: project.id, status: project.status, resultSet });
+  }
   const reprocess = url.pathname.match(/^\/api\/projects\/([^/]+)\/reprocess$/);
   if (req.method === 'GET' && match) return projects.has(match[1]) ? json(res, 200, projects.get(match[1])) : json(res, 404, { error: '프로젝트를 찾을 수 없습니다.' });
   const logsJob = url.pathname.match(/^\/api\/projects\/([^/]+)\/logs$/);

@@ -29,3 +29,30 @@
 `GET /api/projects/:id`
 
 편집기 진입 전에 처리 상태를 확인한다. `queued`, `processing`, `ready`, `failed` 상태를 사용한다.
+## 추천 클립 결과
+
+`GET /api/projects/:id/results`
+
+분석이 완료된 프로젝트의 결과 후보를 반환한다. 하나의 원본에서 여러 숏폼 후보를 탐색할 수 있도록 한다.
+
+```json
+{
+  "projectId": "...",
+  "status": "ready",
+  "resultSet": {
+    "sourceVideo": { "title": "...", "source": "..." },
+    "clips": [
+      {
+        "id": "...-clip-01",
+        "title": "...",
+        "duration": "00:50",
+        "viralScore": 99,
+        "scoreReason": "...",
+        "subtitleText": "...",
+        "start": 0,
+        "end": 50
+      }
+    ]
+  }
+}
+```

@@ -73,3 +73,5 @@
 업로드 또는 YouTube 다운로드가 완료되면 FFprobe로 `duration`, `width`, `height` 메타데이터도 프로젝트에 기록한다.
 
 YouTube 다운로드 시 자동 생성 자막을 우선 수집해 `captions`와 `captionCues`로 저장하며, 자막이 없으면 local fallback 후보를 사용한다.
+
+`POST /api/projects/:id/assets/file`은 자산 파일 본문을 서버에 저장하고 `x-file-name`, `x-asset-prompt` 헤더로 프로젝트 자산과 연결한다. 오디오 자산은 FFmpeg 내보내기 시 원본 영상과 합성된다.

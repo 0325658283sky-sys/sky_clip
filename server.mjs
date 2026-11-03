@@ -102,6 +102,14 @@ const server = createServer(async (req, res) => {
       return json(res, 400, { error: `영상 업로드에 실패했습니다: ${error?.message || error}` });
     }
   }
+  const assetFileJob = url.pathname.match(/^\/api\/projects\/([^/]+)\/assets\/file$/);
+  if (req.method === 'POST' && assetFileJob) {
+    const project = projects.get(assetFileJob[1]);
+    if (!project) return json(res, 404, { error: '프로젝트를 찾을 수 없습니다.' });
+    const extension = (req.headers['x-file-name'] || '').toLowerCase().match(/\.(mp3|wav|m4a|aac|mp4|mov|webm|png|jpg|jpeg|webp)$/)?.[1] || 'bin';
+    const output = join(root, 'uploads', `${project.id}-asset-${Date.now()}.${extension}`);
+    try { await pipeline(req, createWriteStream(output)); const prompt = req.headers['x-asset-prompt'] || ''; const assets = (project.assets || []).map(asset => asset.prompt === prompt ? { ...asset, filePath: output } : asset); const updated = { ...project, assets }; projects.set(project.id, updated); persist(); return json(res, 201, { ok: true, filePath: output, assets }); } catch (error) { return json(res, 400, { error: `자산 업로드에 실패했습니다: ${error?.message || error}` }); }
+  }
   const resultsJob = url.pathname.match(/^\/api\/projects\/([^/]+)\/results$/);
   if (req.method === 'GET' && resultsJob) {
     const project = projects.get(resultsJob[1]);
@@ -178,7 +186,10 @@ const server = createServer(async (req, res) => {
     if (project.renderInput) {
       const output = join(root, 'renders', `${id}.mp4`);
       const trimArgs = Number.isFinite(project.editorState?.clipStart) && Number.isFinite(project.editorState?.clipEnd) ? ['-ss', String(project.editorState.clipStart), '-to', String(project.editorState.clipEnd)] : [];
-      const child = spawn(process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg', ['-y', ...trimArgs, '-i', project.renderInput, '-vf', 'scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:color=black', '-c:v', 'libx264', '-preset', 'medium', '-crf', '20', '-c:a', 'aac', '-movflags', '+faststart', output], { stdio: ['ignore', 'ignore', 'pipe'] });
+      const audioAssetPath = project.editorState?.audioFile ? project.assets?.find(asset => asset.fileName === project.editorState.audioFile)?.filePath : null;
+      const audioInputArgs = audioAssetPath ? ['-i', audioAssetPath] : [];
+      const audioMapArgs = audioAssetPath ? ['-map', '0:v:0', '-map', '1:a:0', '-shortest'] : ['-c:a', 'aac'];
+      const child = spawn(process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg', ['-y', ...trimArgs, '-i', project.renderInput, ...audioInputArgs, '-vf', 'scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:color=black', '-c:v', 'libx264', '-preset', 'medium', '-crf', '20', ...audioMapArgs, '-movflags', '+faststart', output], { stdio: ['ignore', 'ignore', 'pipe'] });
       projects.set(id, { ...project, exportStatus: 'processing', exportOutput: output, exportProgress: 1 }); persist(); logProject(id, 'FFmpeg 렌더링을 시작했습니다.');
       child.stderr.on('data', chunk => { const match = String(chunk).match(/time=(\d+):(\d+):(\d+\.\d+)/); if (!match) return; const seconds = Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3]); const current = projects.get(id); if (current) { projects.set(id, { ...current, exportProgress: Math.min(99, Math.round(seconds / Math.max(1, current.duration || 60) * 100)) }); persist(); } });
       child.on('close', code => { logProject(id, code === 0 ? '렌더링이 완료되었습니다.' : '렌더링에 실패했습니다.'); const current = projects.get(id); if (current) { projects.set(id, { ...current, exportStatus: code === 0 ? 'ready' : 'failed' }); persist(); } });

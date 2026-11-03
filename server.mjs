@@ -37,7 +37,17 @@ const buildResultClips = (project) => {
   ];
 };
 const analysisProvider = process.env.SKYCLIP_ANALYSIS_PROVIDER || 'local';
-const buildAnalysisState = (project, stage = 'queued') => ({ provider: analysisProvider, mode: analysisProvider === 'local' ? 'fallback' : 'external', stage, sourceType: project.source === 'local-video' ? 'upload' : 'url', transcriptReady: stage === 'ready', highlightsReady: stage === 'ready' });
+const buildAnalysisState = (project, stage = 'queued') => ({ provider: analysisProvider, mode: analysisProvider === 'local' ? 'fallback' : 'external', stage, sourceType: project.sourceType || (project.source === 'local-video' ? 'upload' : 'url'), transcriptReady: stage === 'ready', highlightsReady: stage === 'ready' });
+const isYoutubeUrl = value => /(?:youtube\.com|youtu\.be)/i.test(String(value || ''));
+const completeAnalysis = project => { const clips = buildResultClips(project); return { ...project, status: 'ready', progress: 100, analysis: buildAnalysisState(project, 'ready'), captions: clips.slice(0, 3).map(clip => clip.subtitleText), captionCues: clips.slice(0, 3).map(clip => ({ start: clip.start, end: clip.end })), resultSet: { sourceVideo: { title: project.title, source: project.source }, clips } }; };
+const startYoutubeDownload = project => {
+  const output = join(root, 'uploads', `${project.id}.mp4`);
+  const downloading = { ...project, sourceType: 'youtube', status: 'processing', progress: 15, analysis: buildAnalysisState(project, 'downloading') };
+  projects.set(project.id, downloading); persist(); logProject(project.id, 'YouTube 원본 다운로드를 시작했습니다.');
+  const child = spawn('yt-dlp', ['--no-playlist', '--merge-output-format', 'mp4', '-o', output, project.source], { stdio: ['ignore', 'ignore', 'pipe'] });
+  child.stderr.on('data', chunk => { const current = projects.get(project.id); if (current) { const percent = String(chunk).match(/(\d{1,3}(?:\.\d+)?)%/); projects.set(project.id, { ...current, progress: percent ? Math.max(15, Math.min(72, Math.round(Number(percent[1]) * 0.57 + 15))) : current.progress }); persist(); } });
+  child.on('close', code => { const current = projects.get(project.id); if (!current) return; if (code !== 0) { logProject(project.id, 'YouTube 원본 다운로드에 실패했습니다.'); projects.set(project.id, { ...current, status: 'failed', progress: 0, analysis: buildAnalysisState(current, 'failed') }); persist(); return; } const ready = completeAnalysis({ ...current, renderInput: output, sourceType: 'youtube', progress: 85 }); projects.set(project.id, ready); persist(); logProject(project.id, 'YouTube 원본 다운로드와 분석이 완료되었습니다.'); });
+};
 const json = (res, status, body) => {
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'access-control-allow-origin': '*' });
   res.end(JSON.stringify(body));
@@ -62,13 +72,14 @@ const server = createServer(async (req, res) => {
     const creditCost = Math.max(0, Number(input.creditCost || 0));
     if (creditCost > creditBalance) return json(res, 402, { error: '크레딧이 부족합니다.', balance: creditBalance, required: creditCost });
     creditBalance -= creditCost;
-    const project = { id: randomUUID(), title: input.title || '새 프로젝트', source: input.source || null, creditCost, status: 'queued', progress: 0, analysis: buildAnalysisState({ source: input.source || null }, 'queued'), logs: [{ message: '프로젝트 생성 요청을 받았습니다.', at: new Date().toISOString() }], createdAt: new Date().toISOString() };
+    const project = { id: randomUUID(), title: input.title || '새 프로젝트', source: input.source || null, sourceType: isYoutubeUrl(input.source) ? 'youtube' : (input.source === 'local-video' ? 'upload' : 'url'), creditCost, status: 'queued', progress: 0, analysis: buildAnalysisState({ source: input.source || null }, 'queued'), logs: [{ message: '프로젝트 생성 요청을 받았습니다.', at: new Date().toISOString() }], createdAt: new Date().toISOString() };
     projects.set(project.id, project);
     if (input.requestId) creditRequests.set(input.requestId, project);
     persist();
+    if (isYoutubeUrl(project.source)) startYoutubeDownload(project);
     setTimeout(() => { logProject(project.id, 'AI 분석을 시작했습니다.'); const current = projects.get(project.id); if (current) { projects.set(project.id, { ...current, status: 'processing', progress: 35, analysis: buildAnalysisState(current, 'transcribing') }); persist(); } }, 250);
     setTimeout(() => { logProject(project.id, '하이라이트와 자막 후보를 분석 중입니다.'); const current = projects.get(project.id); if (current) { projects.set(project.id, { ...current, status: 'processing', progress: 72, analysis: buildAnalysisState(current, 'scoring') }); persist(); } }, 600);
-    setTimeout(() => { logProject(project.id, '분석이 완료되었습니다.'); const current = projects.get(project.id); if (current) { const clips = buildResultClips(current); projects.set(project.id, { ...current, status: 'ready', progress: 100, analysis: buildAnalysisState(current, 'ready'), captions: clips.slice(0, 3).map(clip => clip.subtitleText), captionCues: clips.slice(0, 3).map(clip => ({ start: clip.start, end: clip.end })), resultSet: { sourceVideo: { title: current.title, source: current.source }, clips } }); persist(); } }, 900);
+    setTimeout(() => { logProject(project.id, '분석이 완료되었습니다.'); const current = projects.get(project.id); if (current && current.sourceType !== 'youtube') { projects.set(project.id, completeAnalysis(current)); persist(); } }, 900);
     return json(res, 201, project);
   }
   const match = url.pathname.match(/^\/api\/projects\/([^/]+)$/);

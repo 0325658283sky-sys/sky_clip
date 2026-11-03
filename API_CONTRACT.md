@@ -58,3 +58,9 @@
 ```
 
 `POST /api/projects/:id/export`는 `clipStart`, `clipEnd`를 선택적으로 받아 해당 구간만 FFmpeg로 렌더링한다.
+
+## 분석 상태
+
+`GET /api/projects/:id/analysis`
+
+분석 제공자와 현재 단계(`queued`, `transcribing`, `scoring`, `ready`), 자막 준비 여부, 하이라이트 준비 여부를 반환한다. 현재 기본 제공자는 외부 키 없이 동작하는 `local` fallback이며, 외부 STT/하이라이트 제공자는 `SKYCLIP_ANALYSIS_PROVIDER`로 교체할 수 있다.

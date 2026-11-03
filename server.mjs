@@ -33,6 +33,8 @@ const buildResultClips = (project) => {
     { id: `${project.id}-clip-06`, title: '마무리 메시지', duration: '00:48', viralScore: 94, scoreReason: '감정적 긴장감이 높아 후킹 제목과 함께 사용하기 좋습니다.', subtitleText: '영상 전체의 문제 의식을 짧게 정리하는 마무리 구간입니다.', start: 235, end: 283 }
   ];
 };
+const analysisProvider = process.env.SKYCLIP_ANALYSIS_PROVIDER || 'local';
+const buildAnalysisState = (project, stage = 'queued') => ({ provider: analysisProvider, mode: analysisProvider === 'local' ? 'fallback' : 'external', stage, sourceType: project.source === 'local-video' ? 'upload' : 'url', transcriptReady: stage === 'ready', highlightsReady: stage === 'ready' });
 const json = (res, status, body) => {
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'access-control-allow-origin': '*' });
   res.end(JSON.stringify(body));
@@ -57,13 +59,13 @@ const server = createServer(async (req, res) => {
     const creditCost = Math.max(0, Number(input.creditCost || 0));
     if (creditCost > creditBalance) return json(res, 402, { error: '크레딧이 부족합니다.', balance: creditBalance, required: creditCost });
     creditBalance -= creditCost;
-    const project = { id: randomUUID(), title: input.title || '새 프로젝트', source: input.source || null, creditCost, status: 'queued', progress: 0, logs: [{ message: '프로젝트 생성 요청을 받았습니다.', at: new Date().toISOString() }], createdAt: new Date().toISOString() };
+    const project = { id: randomUUID(), title: input.title || '새 프로젝트', source: input.source || null, creditCost, status: 'queued', progress: 0, analysis: buildAnalysisState({ source: input.source || null }, 'queued'), logs: [{ message: '프로젝트 생성 요청을 받았습니다.', at: new Date().toISOString() }], createdAt: new Date().toISOString() };
     projects.set(project.id, project);
     if (input.requestId) creditRequests.set(input.requestId, project);
     persist();
-    setTimeout(() => { logProject(project.id, 'AI 분석을 시작했습니다.'); const current = projects.get(project.id); if (current) { projects.set(project.id, { ...current, status: 'processing', progress: 35 }); persist(); } }, 250);
-    setTimeout(() => { logProject(project.id, '하이라이트와 자막 후보를 분석 중입니다.'); const current = projects.get(project.id); if (current) { projects.set(project.id, { ...current, status: 'processing', progress: 72 }); persist(); } }, 600);
-    setTimeout(() => { logProject(project.id, '분석이 완료되었습니다.'); const current = projects.get(project.id); if (current) { projects.set(project.id, { ...current, status: 'ready', progress: 100, resultSet: { sourceVideo: { title: current.title, source: current.source }, clips: buildResultClips(current) } }); persist(); } }, 900);
+    setTimeout(() => { logProject(project.id, 'AI 분석을 시작했습니다.'); const current = projects.get(project.id); if (current) { projects.set(project.id, { ...current, status: 'processing', progress: 35, analysis: buildAnalysisState(current, 'transcribing') }); persist(); } }, 250);
+    setTimeout(() => { logProject(project.id, '하이라이트와 자막 후보를 분석 중입니다.'); const current = projects.get(project.id); if (current) { projects.set(project.id, { ...current, status: 'processing', progress: 72, analysis: buildAnalysisState(current, 'scoring') }); persist(); } }, 600);
+    setTimeout(() => { logProject(project.id, '분석이 완료되었습니다.'); const current = projects.get(project.id); if (current) { const clips = buildResultClips(current); projects.set(project.id, { ...current, status: 'ready', progress: 100, analysis: buildAnalysisState(current, 'ready'), captions: clips.slice(0, 3).map(clip => clip.subtitleText), captionCues: clips.slice(0, 3).map(clip => ({ start: clip.start, end: clip.end })), resultSet: { sourceVideo: { title: current.title, source: current.source }, clips } }); persist(); } }, 900);
     return json(res, 201, project);
   }
   const match = url.pathname.match(/^\/api\/projects\/([^/]+)$/);
@@ -73,6 +75,12 @@ const server = createServer(async (req, res) => {
     if (!project) return json(res, 404, { error: '프로젝트를 찾을 수 없습니다.' });
     const resultSet = project.resultSet || { sourceVideo: { title: project.title, source: project.source }, clips: buildResultClips(project) };
     return json(res, 200, { projectId: project.id, status: project.status, resultSet });
+  }
+  const analysisJob = url.pathname.match(/^\/api\/projects\/([^/]+)\/analysis$/);
+  if (req.method === 'GET' && analysisJob) {
+    const project = projects.get(analysisJob[1]);
+    if (!project) return json(res, 404, { error: '프로젝트를 찾을 수 없습니다.' });
+    return json(res, 200, { projectId: project.id, status: project.status, progress: project.progress, analysis: project.analysis || buildAnalysisState(project, project.status === 'ready' ? 'ready' : project.status) });
   }
   const reprocess = url.pathname.match(/^\/api\/projects\/([^/]+)\/reprocess$/);
   if (req.method === 'GET' && match) return projects.has(match[1]) ? json(res, 200, projects.get(match[1])) : json(res, 404, { error: '프로젝트를 찾을 수 없습니다.' });

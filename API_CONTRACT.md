@@ -64,3 +64,8 @@
 `GET /api/projects/:id/analysis`
 
 분석 제공자와 현재 단계(`queued`, `transcribing`, `scoring`, `ready`), 자막 준비 여부, 하이라이트 준비 여부를 반환한다. 현재 기본 제공자는 외부 키 없이 동작하는 `local` fallback이며, 외부 STT/하이라이트 제공자는 `SKYCLIP_ANALYSIS_PROVIDER`로 교체할 수 있다.
+## 원본 영상 업로드
+
+`POST /api/projects/:id/source`
+
+영상 파일을 요청 본문으로 보내고 `x-file-name` 헤더에 원본 파일명을 전달한다. 서버는 `renderInput`을 저장해 이후 선택 구간 렌더링에 사용한다.

@@ -5,6 +5,8 @@ import { extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { createReadStream } from 'node:fs';
+import { createWriteStream } from 'node:fs';
+import { pipeline } from 'node:stream/promises';
 
 const projects = new Map();
 const creditRequests = new Map();
@@ -12,6 +14,7 @@ let creditBalance = 300;
 const root = fileURLToPath(new URL('.', import.meta.url));
 const dataFile = join(root, 'skyclip-data.json');
 await mkdir(join(root, 'renders'), { recursive: true });
+await mkdir(join(root, 'uploads'), { recursive: true });
 const mime = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.json': 'application/json; charset=utf-8' };
 try {
   const saved = JSON.parse(await readFile(dataFile, 'utf8'));
@@ -69,6 +72,21 @@ const server = createServer(async (req, res) => {
     return json(res, 201, project);
   }
   const match = url.pathname.match(/^\/api\/projects\/([^/]+)$/);
+  const sourceJob = url.pathname.match(/^\/api\/projects\/([^/]+)\/source$/);
+  if (req.method === 'POST' && sourceJob) {
+    const project = projects.get(sourceJob[1]);
+    if (!project) return json(res, 404, { error: '프로젝트를 찾을 수 없습니다.' });
+    const extension = (req.headers['x-file-name'] || '').toLowerCase().match(/\.(mp4|mov|webm)$/)?.[1] || 'mp4';
+    const output = join(root, 'uploads', `${project.id}.${extension}`);
+    try {
+      await pipeline(req, createWriteStream(output));
+      const updated = { ...project, source: 'local-video', renderInput: output, sourceFile: req.headers['x-file-name'] || `${project.id}.${extension}`, sourceType: 'upload', updatedAt: new Date().toISOString() };
+      projects.set(project.id, updated); persist(); logProject(project.id, '영상 파일 업로드가 완료되었습니다.');
+      return json(res, 201, { ok: true, project: updated });
+    } catch (error) {
+      return json(res, 400, { error: `영상 업로드에 실패했습니다: ${error?.message || error}` });
+    }
+  }
   const resultsJob = url.pathname.match(/^\/api\/projects\/([^/]+)\/results$/);
   if (req.method === 'GET' && resultsJob) {
     const project = projects.get(resultsJob[1]);

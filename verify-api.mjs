@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { readFile } from 'node:fs/promises';
 
 const port = 18787;
 const base = `http://127.0.0.1:${port}`;
@@ -25,6 +26,7 @@ try {
   const projects = await (await fetch(`${base}/api/projects`)).json();
   const credits = await (await fetch(`${base}/api/credits`)).json();
   const created = await (await fetch(`${base}/api/projects`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title: '결과 API 검증', source: 'https://example.com/video', creditCost: 0, requestId: `verify-${Date.now()}` }) })).json();
+  const upload = await (await fetch(`${base}/api/projects/${created.id}/source`, { method: 'POST', headers: { 'content-type': 'video/mp4', 'x-file-name': 'verify.mp4' }, body: await readFile(new URL('./test-input.mp4', import.meta.url)) })).json();
   await new Promise(resolve => setTimeout(resolve, 1100));
   const results = await (await fetch(`${base}/api/projects/${created.id}/results`)).json();
   const analysis = await (await fetch(`${base}/api/projects/${created.id}/analysis`)).json();
@@ -36,6 +38,7 @@ try {
     ['credits', Number.isFinite(credits.balance)],
     ['result-clips', Array.isArray(results.resultSet?.clips) && results.resultSet.clips.length === 6],
     ['analysis-state', analysis.analysis?.provider === 'local' && analysis.analysis?.stage === 'ready' && analysis.analysis.transcriptReady === true],
+    ['source-upload', upload.ok === true && upload.project?.sourceType === 'upload' && Boolean(upload.project?.renderInput)],
     ['export-range', exportRequest.status === 'queued' && exportedProject.editorState?.clipStart === 12 && exportedProject.editorState?.clipEnd === 42]
   ];
   for (const [name, ok] of checks) console.log(`${ok ? 'PASS' : 'FAIL'} API ${name}`);

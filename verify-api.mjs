@@ -25,6 +25,7 @@ const waitForServer = async () => {
 try {
   await waitForServer();
   const health = await (await fetch(`${base}/api/health`)).json();
+  const session = await (await fetch(`${base}/api/session`, { headers: { 'x-workspace-id': 'verify-workspace' } })).json();
   const projects = await (await fetch(`${base}/api/projects`)).json();
   const isolatedProjects = await (await fetch(`${base}/api/projects`, { headers: { 'x-workspace-id': 'isolated-workspace' } })).json();
   const credits = await (await fetch(`${base}/api/credits`)).json();
@@ -45,6 +46,7 @@ try {
   const exportedProject = await (await fetch(`${base}/api/projects/${created.id}`)).json();
   const checks = [
     ['health', health.ok === true && health.service === 'skyclip'],
+    ['session', session.authenticated === false && session.authMode === 'workspace' && session.workspaceId === 'verify-workspace'],
     ['projects', Array.isArray(projects.projects)],
     ['workspace-scope', Array.isArray(isolatedProjects.projects) && isolatedProjects.projects.length === 0],
     ['credits', Number.isFinite(credits.balance)],

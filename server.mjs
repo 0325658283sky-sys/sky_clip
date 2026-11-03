@@ -69,6 +69,7 @@ const server = createServer(async (req, res) => {
     }
   }
   if (req.method === 'GET' && url.pathname === '/api/health') return json(res, 200, { ok: true, service: 'skyclip' });
+  if (req.method === 'GET' && url.pathname === '/api/session') return json(res, 200, { authenticated: false, authMode: 'workspace', workspaceId: workspaceIdFromRequest(req), message: '외부 인증 제공자 연결 전 작업공간 모드로 동작합니다.' });
   if (req.method === 'GET' && url.pathname === '/api/projects') return json(res, 200, { projects: [...projects.values()].filter(project => project.workspaceId === workspaceIdFromRequest(req)) });
   if (req.method === 'GET' && url.pathname === '/api/credits') return json(res, 200, { balance: creditBalance, usage: [...projects.values()].filter(project => project.workspaceId === workspaceIdFromRequest(req) && project.creditCost).map(project => ({ projectId: project.id, title: project.title, cost: project.creditCost, createdAt: project.updatedAt || project.createdAt })) });
   if (req.method === 'POST' && url.pathname === '/api/projects') {

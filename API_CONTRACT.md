@@ -56,3 +56,5 @@
   }
 }
 ```
+
+`POST /api/projects/:id/export`는 `clipStart`, `clipEnd`를 선택적으로 받아 해당 구간만 FFmpeg로 렌더링한다.

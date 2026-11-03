@@ -69,3 +69,5 @@
 `POST /api/projects/:id/source`
 
 영상 파일을 요청 본문으로 보내고 `x-file-name` 헤더에 원본 파일명을 전달한다. 서버는 `renderInput`을 저장해 이후 선택 구간 렌더링에 사용한다.
+
+업로드 또는 YouTube 다운로드가 완료되면 FFprobe로 `duration`, `width`, `height` 메타데이터도 프로젝트에 기록한다.

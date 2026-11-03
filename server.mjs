@@ -39,6 +39,7 @@ const buildResultClips = (project) => {
 const analysisProvider = process.env.SKYCLIP_ANALYSIS_PROVIDER || 'local';
 const buildAnalysisState = (project, stage = 'queued') => ({ provider: analysisProvider, mode: analysisProvider === 'local' ? 'fallback' : 'external', stage, sourceType: project.sourceType || (project.source === 'local-video' ? 'upload' : 'url'), transcriptReady: stage === 'ready', highlightsReady: stage === 'ready' });
 const isYoutubeUrl = value => /(?:youtube\.com|youtu\.be)/i.test(String(value || ''));
+const probeMedia = file => new Promise(resolve => { const child = spawn('ffprobe', ['-v', 'error', '-show_entries', 'format=duration:stream=width,height', '-of', 'json', file], { stdio: ['ignore', 'pipe', 'ignore'] }); let raw = ''; child.stdout.on('data', chunk => { raw += String(chunk); }); child.on('close', () => { try { const parsed = JSON.parse(raw); const stream = parsed.streams?.find(item => item.width || item.height) || {}; resolve({ duration: Number(parsed.format?.duration) || null, width: Number(stream.width) || null, height: Number(stream.height) || null }); } catch { resolve({ duration: null, width: null, height: null }); } }); child.on('error', () => resolve({ duration: null, width: null, height: null })); });
 const completeAnalysis = project => { const clips = buildResultClips(project); return { ...project, status: 'ready', progress: 100, analysis: buildAnalysisState(project, 'ready'), captions: clips.slice(0, 3).map(clip => clip.subtitleText), captionCues: clips.slice(0, 3).map(clip => ({ start: clip.start, end: clip.end })), resultSet: { sourceVideo: { title: project.title, source: project.source }, clips } }; };
 const startYoutubeDownload = project => {
   const output = join(root, 'uploads', `${project.id}.mp4`);
@@ -46,7 +47,7 @@ const startYoutubeDownload = project => {
   projects.set(project.id, downloading); persist(); logProject(project.id, 'YouTube 원본 다운로드를 시작했습니다.');
   const child = spawn('yt-dlp', ['--no-playlist', '--merge-output-format', 'mp4', '-o', output, project.source], { stdio: ['ignore', 'ignore', 'pipe'] });
   child.stderr.on('data', chunk => { const current = projects.get(project.id); if (current) { const percent = String(chunk).match(/(\d{1,3}(?:\.\d+)?)%/); projects.set(project.id, { ...current, progress: percent ? Math.max(15, Math.min(72, Math.round(Number(percent[1]) * 0.57 + 15))) : current.progress }); persist(); } });
-  child.on('close', code => { const current = projects.get(project.id); if (!current) return; if (code !== 0) { logProject(project.id, 'YouTube 원본 다운로드에 실패했습니다.'); projects.set(project.id, { ...current, status: 'failed', progress: 0, analysis: buildAnalysisState(current, 'failed') }); persist(); return; } const ready = completeAnalysis({ ...current, renderInput: output, sourceType: 'youtube', progress: 85 }); projects.set(project.id, ready); persist(); logProject(project.id, 'YouTube 원본 다운로드와 분석이 완료되었습니다.'); });
+  child.on('close', async code => { const current = projects.get(project.id); if (!current) return; if (code !== 0) { logProject(project.id, 'YouTube 원본 다운로드에 실패했습니다.'); projects.set(project.id, { ...current, status: 'failed', progress: 0, analysis: buildAnalysisState(current, 'failed') }); persist(); return; } const metadata = await probeMedia(output); const ready = completeAnalysis({ ...current, ...metadata, renderInput: output, sourceType: 'youtube', progress: 85 }); projects.set(project.id, ready); persist(); logProject(project.id, 'YouTube 원본 다운로드와 분석이 완료되었습니다.'); });
 };
 const json = (res, status, body) => {
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'access-control-allow-origin': '*' });
@@ -91,7 +92,8 @@ const server = createServer(async (req, res) => {
     const output = join(root, 'uploads', `${project.id}.${extension}`);
     try {
       await pipeline(req, createWriteStream(output));
-      const updated = { ...project, source: 'local-video', renderInput: output, sourceFile: req.headers['x-file-name'] || `${project.id}.${extension}`, sourceType: 'upload', updatedAt: new Date().toISOString() };
+      const metadata = await probeMedia(output);
+      const updated = { ...project, ...metadata, source: 'local-video', renderInput: output, sourceFile: req.headers['x-file-name'] || `${project.id}.${extension}`, sourceType: 'upload', updatedAt: new Date().toISOString() };
       projects.set(project.id, updated); persist(); logProject(project.id, '영상 파일 업로드가 완료되었습니다.');
       return json(res, 201, { ok: true, project: updated });
     } catch (error) {

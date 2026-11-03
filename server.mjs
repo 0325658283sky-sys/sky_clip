@@ -1,6 +1,6 @@
 import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, rename } from 'node:fs/promises';
 import { extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
@@ -23,7 +23,8 @@ try {
 } catch (error) {
   console.warn(`[SkyClip] 저장 데이터 로드 실패: ${error?.message || error}. 기본 상태로 시작합니다.`);
 }
-const persist = () => writeFile(dataFile, JSON.stringify({ creditBalance, projects: [...projects.values()] }, null, 2), 'utf8').catch(() => {});
+let persistQueue = Promise.resolve();
+const persist = () => { persistQueue = persistQueue.then(async () => { const tempFile = `${dataFile}.tmp`; await writeFile(tempFile, JSON.stringify({ creditBalance, projects: [...projects.values()] }, null, 2), 'utf8'); await rename(tempFile, dataFile); }).catch(() => {}); return persistQueue; };
 const logProject = (id, message) => { const project = projects.get(id); if (!project) return; projects.set(id, { ...project, logs: [...(project.logs || []), { message, at: new Date().toISOString() }] }); persist(); };
 const buildResultClips = (project) => {
   const sourceLabel = project.source ? '분석 영상' : '새 프로젝트';

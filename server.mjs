@@ -19,7 +19,7 @@ const mime = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=u
 try {
   const saved = JSON.parse(await readFile(dataFile, 'utf8'));
   creditBalance = saved.creditBalance ?? 300;
-  for (const project of saved.projects || []) projects.set(project.id, project);
+  for (const project of saved.projects || []) projects.set(project.id, { workspaceId: project.workspaceId || 'demo-workspace', ...project });
 } catch (error) {
   console.warn(`[SkyClip] 저장 데이터 로드 실패: ${error?.message || error}. 기본 상태로 시작합니다.`);
 }
@@ -56,6 +56,8 @@ const json = (res, status, body) => {
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'access-control-allow-origin': '*' });
   res.end(JSON.stringify(body));
 };
+const workspaceIdFromRequest = req => req.headers['x-workspace-id'] || String(req.headers.cookie || '').match(/(?:^|;\s*)skyclip_workspace=([^;]+)/)?.[1] || 'demo-workspace';
+const visibleProject = (req, id) => { const project = projects.get(id); return project && project.workspaceId === workspaceIdFromRequest(req) ? project : null; };
 
 const server = createServer(async (req, res) => {
   if (req.method === 'OPTIONS') { res.writeHead(204, { 'access-control-allow-origin': '*', 'access-control-allow-methods': 'GET,POST,OPTIONS', 'access-control-allow-headers': 'content-type' }); return res.end(); }
@@ -67,8 +69,8 @@ const server = createServer(async (req, res) => {
     }
   }
   if (req.method === 'GET' && url.pathname === '/api/health') return json(res, 200, { ok: true, service: 'skyclip' });
-  if (req.method === 'GET' && url.pathname === '/api/projects') return json(res, 200, { projects: [...projects.values()] });
-  if (req.method === 'GET' && url.pathname === '/api/credits') return json(res, 200, { balance: creditBalance, usage: [...projects.values()].filter(project => project.creditCost).map(project => ({ projectId: project.id, title: project.title, cost: project.creditCost, createdAt: project.updatedAt || project.createdAt })) });
+  if (req.method === 'GET' && url.pathname === '/api/projects') return json(res, 200, { projects: [...projects.values()].filter(project => project.workspaceId === workspaceIdFromRequest(req)) });
+  if (req.method === 'GET' && url.pathname === '/api/credits') return json(res, 200, { balance: creditBalance, usage: [...projects.values()].filter(project => project.workspaceId === workspaceIdFromRequest(req) && project.creditCost).map(project => ({ projectId: project.id, title: project.title, cost: project.creditCost, createdAt: project.updatedAt || project.createdAt })) });
   if (req.method === 'POST' && url.pathname === '/api/projects') {
     let raw = ''; for await (const chunk of req) raw += chunk;
     const input = raw ? JSON.parse(raw) : {};
@@ -76,7 +78,7 @@ const server = createServer(async (req, res) => {
     const creditCost = Math.max(0, Number(input.creditCost || 0));
     if (creditCost > creditBalance) return json(res, 402, { error: '크레딧이 부족합니다.', balance: creditBalance, required: creditCost });
     creditBalance -= creditCost;
-    const project = { id: randomUUID(), title: input.title || '새 프로젝트', source: input.source || null, sourceType: isYoutubeUrl(input.source) ? 'youtube' : (input.source === 'local-video' ? 'upload' : 'url'), creditCost, status: 'queued', progress: 0, analysis: buildAnalysisState({ source: input.source || null }, 'queued'), logs: [{ message: '프로젝트 생성 요청을 받았습니다.', at: new Date().toISOString() }], createdAt: new Date().toISOString() };
+    const project = { id: randomUUID(), workspaceId: workspaceIdFromRequest(req), title: input.title || '새 프로젝트', source: input.source || null, sourceType: isYoutubeUrl(input.source) ? 'youtube' : (input.source === 'local-video' ? 'upload' : 'url'), creditCost, status: 'queued', progress: 0, analysis: buildAnalysisState({ source: input.source || null }, 'queued'), logs: [{ message: '프로젝트 생성 요청을 받았습니다.', at: new Date().toISOString() }], createdAt: new Date().toISOString() };
     projects.set(project.id, project);
     if (input.requestId) creditRequests.set(input.requestId, project);
     persist();
@@ -89,7 +91,7 @@ const server = createServer(async (req, res) => {
   const match = url.pathname.match(/^\/api\/projects\/([^/]+)$/);
   const sourceJob = url.pathname.match(/^\/api\/projects\/([^/]+)\/source$/);
   if (req.method === 'POST' && sourceJob) {
-    const project = projects.get(sourceJob[1]);
+    const project = visibleProject(req, sourceJob[1]);
     if (!project) return json(res, 404, { error: '프로젝트를 찾을 수 없습니다.' });
     const extension = (req.headers['x-file-name'] || '').toLowerCase().match(/\.(mp4|mov|webm)$/)?.[1] || 'mp4';
     const output = join(root, 'uploads', `${project.id}.${extension}`);
@@ -105,7 +107,7 @@ const server = createServer(async (req, res) => {
   }
   const assetFileJob = url.pathname.match(/^\/api\/projects\/([^/]+)\/assets\/file$/);
   if (req.method === 'POST' && assetFileJob) {
-    const project = projects.get(assetFileJob[1]);
+    const project = visibleProject(req, assetFileJob[1]);
     if (!project) return json(res, 404, { error: '프로젝트를 찾을 수 없습니다.' });
     const extension = (req.headers['x-file-name'] || '').toLowerCase().match(/\.(mp3|wav|m4a|aac|mp4|mov|webm|png|jpg|jpeg|webp)$/)?.[1] || 'bin';
     const output = join(root, 'uploads', `${project.id}-asset-${Date.now()}.${extension}`);
@@ -113,23 +115,23 @@ const server = createServer(async (req, res) => {
   }
   const resultsJob = url.pathname.match(/^\/api\/projects\/([^/]+)\/results$/);
   if (req.method === 'GET' && resultsJob) {
-    const project = projects.get(resultsJob[1]);
+    const project = visibleProject(req, resultsJob[1]);
     if (!project) return json(res, 404, { error: '프로젝트를 찾을 수 없습니다.' });
     const resultSet = project.resultSet || { sourceVideo: { title: project.title, source: project.source }, clips: buildResultClips(project) };
     return json(res, 200, { projectId: project.id, status: project.status, resultSet });
   }
   const analysisJob = url.pathname.match(/^\/api\/projects\/([^/]+)\/analysis$/);
   if (req.method === 'GET' && analysisJob) {
-    const project = projects.get(analysisJob[1]);
+    const project = visibleProject(req, analysisJob[1]);
     if (!project) return json(res, 404, { error: '프로젝트를 찾을 수 없습니다.' });
     return json(res, 200, { projectId: project.id, status: project.status, progress: project.progress, analysis: project.analysis || buildAnalysisState(project, project.status === 'ready' ? 'ready' : project.status) });
   }
   const reprocess = url.pathname.match(/^\/api\/projects\/([^/]+)\/reprocess$/);
-  if (req.method === 'GET' && match) return projects.has(match[1]) ? json(res, 200, projects.get(match[1])) : json(res, 404, { error: '프로젝트를 찾을 수 없습니다.' });
+  if (req.method === 'GET' && match) { const project = visibleProject(req, match[1]); return project ? json(res, 200, project) : json(res, 404, { error: '프로젝트를 찾을 수 없습니다.' }); }
   const logsJob = url.pathname.match(/^\/api\/projects\/([^/]+)\/logs$/);
-  if (req.method === 'GET' && logsJob) return projects.has(logsJob[1]) ? json(res, 200, { logs: projects.get(logsJob[1]).logs || [] }) : json(res, 404, { error: '프로젝트를 찾을 수 없습니다.' });
+  if (req.method === 'GET' && logsJob) { const project = visibleProject(req, logsJob[1]); return project ? json(res, 200, { logs: project.logs || [] }) : json(res, 404, { error: '프로젝트를 찾을 수 없습니다.' }); }
   if (req.method === 'PUT' && match) {
-    if (!projects.has(match[1])) return json(res, 404, { error: '프로젝트를 찾을 수 없습니다.' });
+    if (!visibleProject(req, match[1])) return json(res, 404, { error: '프로젝트를 찾을 수 없습니다.' });
     let raw = ''; for await (const chunk of req) raw += chunk;
     const update = raw ? JSON.parse(raw) : {};
     const project = { ...projects.get(match[1]), ...update, updatedAt: new Date().toISOString() };

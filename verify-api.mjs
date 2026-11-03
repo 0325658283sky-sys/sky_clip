@@ -26,6 +26,7 @@ try {
   await waitForServer();
   const health = await (await fetch(`${base}/api/health`)).json();
   const projects = await (await fetch(`${base}/api/projects`)).json();
+  const isolatedProjects = await (await fetch(`${base}/api/projects`, { headers: { 'x-workspace-id': 'isolated-workspace' } })).json();
   const credits = await (await fetch(`${base}/api/credits`)).json();
   const created = await (await fetch(`${base}/api/projects`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title: '결과 API 검증', source: 'https://example.com/video', creditCost: 0, requestId: `verify-${Date.now()}` }) })).json();
   const upload = await (await fetch(`${base}/api/projects/${created.id}/source`, { method: 'POST', headers: { 'content-type': 'video/mp4', 'x-file-name': 'verify.mp4' }, body: await readFile(new URL('./test-input.mp4', import.meta.url)) })).json();
@@ -45,6 +46,7 @@ try {
   const checks = [
     ['health', health.ok === true && health.service === 'skyclip'],
     ['projects', Array.isArray(projects.projects)],
+    ['workspace-scope', Array.isArray(isolatedProjects.projects) && isolatedProjects.projects.length === 0],
     ['credits', Number.isFinite(credits.balance)],
     ['result-clips', Array.isArray(results.resultSet?.clips) && results.resultSet.clips.length === 6],
     ['analysis-state', analysis.analysis?.provider === 'local' && analysis.analysis?.stage === 'ready' && analysis.analysis.transcriptReady === true],

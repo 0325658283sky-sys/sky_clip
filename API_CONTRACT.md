@@ -75,3 +75,7 @@
 YouTube 다운로드 시 자동 생성 자막을 우선 수집해 `captions`와 `captionCues`로 저장하며, 자막이 없으면 local fallback 후보를 사용한다.
 
 `POST /api/projects/:id/assets/file`은 자산 파일 본문을 서버에 저장하고 `x-file-name`, `x-asset-prompt` 헤더로 프로젝트 자산과 연결한다. 오디오 자산은 FFmpeg 내보내기 시 원본 영상과 합성된다.
+
+## 작업공간 범위
+
+브라우저는 `skyclip_workspace` 쿠키를 사용하고, 서버는 프로젝트·목록·크레딧·상세 조회를 작업공간 ID 기준으로 제한한다. 현재 기본 작업공간은 `demo-workspace`이며 실제 로그인/인증 제공자 연결 시 이 값을 인증된 사용자 또는 workspace claim으로 교체한다.

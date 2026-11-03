@@ -12,7 +12,7 @@ const projects = new Map();
 const creditRequests = new Map();
 let creditBalance = 300;
 const root = fileURLToPath(new URL('.', import.meta.url));
-const dataFile = join(root, 'skyclip-data.json');
+const dataFile = process.env.SKYCLIP_DATA_FILE || join(root, 'skyclip-data.json');
 await mkdir(join(root, 'renders'), { recursive: true });
 await mkdir(join(root, 'uploads'), { recursive: true });
 const mime = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.json': 'application/json; charset=utf-8' };
@@ -187,9 +187,16 @@ const server = createServer(async (req, res) => {
       const output = join(root, 'renders', `${id}.mp4`);
       const trimArgs = Number.isFinite(project.editorState?.clipStart) && Number.isFinite(project.editorState?.clipEnd) ? ['-ss', String(project.editorState.clipStart), '-to', String(project.editorState.clipEnd)] : [];
       const audioAssetPath = project.editorState?.audioFile ? project.assets?.find(asset => asset.fileName === project.editorState.audioFile)?.filePath : null;
-      const audioInputArgs = audioAssetPath ? ['-i', audioAssetPath] : [];
-      const audioMapArgs = audioAssetPath ? ['-map', '0:v:0', '-map', '1:a:0', '-shortest'] : ['-c:a', 'aac'];
-      const child = spawn(process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg', ['-y', ...trimArgs, '-i', project.renderInput, ...audioInputArgs, '-vf', 'scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:color=black', '-c:v', 'libx264', '-preset', 'medium', '-crf', '20', ...audioMapArgs, '-movflags', '+faststart', output], { stdio: ['ignore', 'ignore', 'pipe'] });
+      const visualAsset = project.editorState?.visualAsset;
+      const visualAssetRecord = visualAsset?.fileName ? project.assets?.find(asset => asset.fileName === visualAsset.fileName) : null;
+      const visualAssetPath = visualAssetRecord?.filePath || null;
+      const inputArgs = ['-i', project.renderInput];
+      let filterArgs = ['-vf', 'scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:color=black'];
+      let videoMapArgs = [];
+      let audioMapArgs = ['-c:a', 'aac'];
+      if (visualAssetPath) { inputArgs.push(...(visualAsset.type?.includes('이미지') ? ['-loop', '1', '-i', visualAssetPath] : ['-stream_loop', '-1', '-i', visualAssetPath])); filterArgs = ['-filter_complex', '[0:v]scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:color=black[base];[1:v]scale=900:-2[asset];[base][asset]overlay=(W-w)/2:(H-h)/2:enable=\'between(t,0,99999)\'[v]']; videoMapArgs = ['-map', '[v]']; }
+      if (audioAssetPath) { const audioIndex = visualAssetPath ? '2' : '1'; inputArgs.push('-i', audioAssetPath); audioMapArgs = ['-map', `${audioIndex}:a:0`, '-shortest']; }
+      const child = spawn(process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg', ['-y', ...trimArgs, ...inputArgs, ...filterArgs, ...videoMapArgs, ...(audioAssetPath ? audioMapArgs : ['-map', '0:a?','-c:a', 'aac']), '-c:v', 'libx264', '-preset', 'medium', '-crf', '20', '-movflags', '+faststart', output], { stdio: ['ignore', 'ignore', 'pipe'] });
       projects.set(id, { ...project, exportStatus: 'processing', exportOutput: output, exportProgress: 1 }); persist(); logProject(id, 'FFmpeg 렌더링을 시작했습니다.');
       child.stderr.on('data', chunk => { const match = String(chunk).match(/time=(\d+):(\d+):(\d+\.\d+)/); if (!match) return; const seconds = Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3]); const current = projects.get(id); if (current) { projects.set(id, { ...current, exportProgress: Math.min(99, Math.round(seconds / Math.max(1, current.duration || 60) * 100)) }); persist(); } });
       child.on('close', code => { logProject(id, code === 0 ? '렌더링이 완료되었습니다.' : '렌더링에 실패했습니다.'); const current = projects.get(id); if (current) { projects.set(id, { ...current, exportStatus: code === 0 ? 'ready' : 'failed' }); persist(); } });

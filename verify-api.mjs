@@ -1,11 +1,13 @@
 import { spawn } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 
 const port = 18787;
 const base = `http://127.0.0.1:${port}`;
 const child = spawn(process.execPath, ['server.mjs'], {
   cwd: new URL('.', import.meta.url),
-  env: { ...process.env, PORT: String(port) },
+  env: { ...process.env, PORT: String(port), SKYCLIP_DATA_FILE: join(tmpdir(), 'skyclip-verify-data.json') },
   stdio: ['ignore', 'pipe', 'pipe']
 });
 let output = '';
@@ -29,6 +31,12 @@ try {
   const upload = await (await fetch(`${base}/api/projects/${created.id}/source`, { method: 'POST', headers: { 'content-type': 'video/mp4', 'x-file-name': 'verify.mp4' }, body: await readFile(new URL('./test-input.mp4', import.meta.url)) })).json();
   const assetRecord = await (await fetch(`${base}/api/projects/${created.id}/assets`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ type: '음악', prompt: 'verify-audio', fileName: 'verify-audio.mp4' }) })).json();
   const assetFile = await (await fetch(`${base}/api/projects/${created.id}/assets/file`, { method: 'POST', headers: { 'content-type': 'video/mp4', 'x-file-name': 'verify-audio.mp4', 'x-asset-prompt': 'verify-audio' }, body: await readFile(new URL('./test-input.mp4', import.meta.url)) })).json();
+  await fetch(`${base}/api/projects/${created.id}/assets`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ type: '영상', prompt: 'verify-visual', fileName: 'verify-visual.mp4' }) });
+  const visualFile = await (await fetch(`${base}/api/projects/${created.id}/assets/file`, { method: 'POST', headers: { 'content-type': 'video/mp4', 'x-file-name': 'verify-visual.mp4', 'x-asset-prompt': 'verify-visual' }, body: await readFile(new URL('./test-input.mp4', import.meta.url)) })).json();
+  await fetch(`${base}/api/projects/${created.id}`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ editorState: { visualAsset: { type: '영상', prompt: 'verify-visual', fileName: 'verify-visual.mp4' }, clipStart: 0, clipEnd: 3 } }) });
+  await fetch(`${base}/api/projects/${created.id}/export`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ clipStart: 0, clipEnd: 3 }) });
+  await new Promise(resolve => setTimeout(resolve, 1800));
+  const renderedProject = await (await fetch(`${base}/api/projects/${created.id}`)).json();
   await new Promise(resolve => setTimeout(resolve, 1100));
   const results = await (await fetch(`${base}/api/projects/${created.id}/results`)).json();
   const analysis = await (await fetch(`${base}/api/projects/${created.id}/analysis`)).json();
@@ -42,6 +50,7 @@ try {
     ['analysis-state', analysis.analysis?.provider === 'local' && analysis.analysis?.stage === 'ready' && analysis.analysis.transcriptReady === true],
     ['source-upload', upload.ok === true && upload.project?.sourceType === 'upload' && Boolean(upload.project?.renderInput) && Number.isFinite(upload.project?.duration)],
     ['asset-file', assetRecord.prompt === 'verify-audio' && assetFile.ok === true && assetFile.assets?.some(asset => asset.prompt === 'verify-audio' && asset.filePath)],
+    ['visual-composite', visualFile.ok === true && ['processing', 'ready'].includes(renderedProject.exportStatus)],
     ['export-range', exportRequest.status === 'queued' && exportedProject.editorState?.clipStart === 12 && exportedProject.editorState?.clipEnd === 42]
   ];
   for (const [name, ok] of checks) console.log(`${ok ? 'PASS' : 'FAIL'} API ${name}`);

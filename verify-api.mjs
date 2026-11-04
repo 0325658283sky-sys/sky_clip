@@ -59,7 +59,7 @@ try {
   await new Promise(resolve => setTimeout(resolve, 1100));
   const results = await (await fetch(`${base}/api/projects/${created.id}/results`, { headers: workspaceHeaders })).json();
   const analysis = await (await fetch(`${base}/api/projects/${created.id}/analysis`, { headers: workspaceHeaders })).json();
-  const exportRequest = await (await fetch(`${base}/api/projects/${created.id}/export`, { method: 'POST', headers: { 'content-type': 'application/json', ...workspaceHeaders }, body: JSON.stringify({ clipStart: 12, clipEnd: 42 }) })).json();
+  const exportRequest = await (await fetch(`${base}/api/projects/${created.id}/export`, { method: 'POST', headers: { 'content-type': 'application/json', ...workspaceHeaders }, body: JSON.stringify({ clipStart: 12, clipEnd: 42, format: '1:1' }) })).json();
   const exportedProject = await (await fetch(`${base}/api/projects/${created.id}`, { headers: workspaceHeaders })).json();
   const crossWorkspaceChecks = await Promise.all([
     fetch(`${base}/api/projects/${created.id}`, { headers: isolatedHeaders }),
@@ -85,7 +85,7 @@ try {
     ['source-range', sourceRange.status === 206 && sourceRange.headers.get('content-range')?.startsWith('bytes 0-15/')],
     ['asset-file', assetRecord.prompt === 'verify-audio' && assetFile.ok === true && assetFile.assets?.some(asset => asset.prompt === 'verify-audio' && asset.filePath)],
     ['visual-composite', visualFile.ok === true && ['processing', 'ready'].includes(renderedProject.exportStatus)],
-    ['export-range', exportRequest.status === 'queued' && exportedProject.editorState?.clipStart === 12 && exportedProject.editorState?.clipEnd === 42],
+    ['export-range', exportRequest.status === 'queued' && exportedProject.editorState?.clipStart === 12 && exportedProject.editorState?.clipEnd === 42 && exportedProject.editorState?.format === '1:1'],
     ['workspace-mutation-boundary', crossWorkspaceChecks.every(response => response.status === 404) && exportedProject.workspaceId === 'verify-workspace']
   ];
   for (const [name, ok] of checks) console.log(`${ok ? 'PASS' : 'FAIL'} API ${name}`);

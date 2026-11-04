@@ -31,14 +31,11 @@ const persist = () => { persistQueue = persistQueue.then(async () => { const tem
 const logProject = (id, message) => { const project = projects.get(id); if (!project) return; projects.set(id, { ...project, logs: [...(project.logs || []), { message, at: new Date().toISOString() }] }); persist(); };
 const buildResultClips = (project) => {
   const sourceLabel = project.source ? '분석 영상' : '새 프로젝트';
-  return [
-    { id: `${project.id}-clip-01`, title: `${sourceLabel}의 핵심 장면`, duration: '00:50', viralScore: 99, scoreReason: '강렬한 시작과 명확한 문제 의식이 있어 짧은 영상에서도 메시지가 빠르게 전달됩니다.', subtitleText: '핵심 메시지가 시작부터 선명하게 전달되는 추천 클립입니다.', start: 0, end: 50 },
-    { id: `${project.id}-clip-02`, title: '가장 중요한 반전이 나오는 순간', duration: '00:43', viralScore: 98, scoreReason: '대상과 반전이 분명해 초반 이탈을 줄일 수 있는 클립입니다.', subtitleText: '시청자가 다음 내용을 궁금해하도록 만드는 전환 구간입니다.', start: 50, end: 93 },
-    { id: `${project.id}-clip-03`, title: '짧고 강한 한 문장', duration: '00:40', viralScore: 97, scoreReason: '짧고 독립적인 문장으로 구성돼 빠른 소비에 적합합니다.', subtitleText: '짧은 문장 하나로 주제를 이해할 수 있는 구간입니다.', start: 93, end: 133 },
-    { id: `${project.id}-clip-04`, title: '공감을 만드는 설명', duration: '00:50', viralScore: 96, scoreReason: '공감과 궁금증을 동시에 만드는 설명형 클립입니다.', subtitleText: '상황 설명과 감정선이 자연스럽게 이어지는 구간입니다.', start: 133, end: 183 },
-    { id: `${project.id}-clip-05`, title: '비교로 이해하는 핵심 내용', duration: '00:52', viralScore: 95, scoreReason: '비교 구조가 명확해 정보 전달형 숏폼으로 적합합니다.', subtitleText: '서로 다른 사례를 비교해 핵심을 쉽게 이해시키는 구간입니다.', start: 183, end: 235 },
-    { id: `${project.id}-clip-06`, title: '마무리 메시지', duration: '00:48', viralScore: 94, scoreReason: '감정적 긴장감이 높아 후킹 제목과 함께 사용하기 좋습니다.', subtitleText: '영상 전체의 문제 의식을 짧게 정리하는 마무리 구간입니다.', start: 235, end: 283 }
-  ];
+  const titles = [`${sourceLabel}의 핵심 장면`, '가장 중요한 반전이 나오는 순간', '짧고 강한 한 문장', '공감을 만드는 설명', '비교로 이해하는 핵심 내용', '마무리 메시지'];
+  const reasons = ['강렬한 시작과 명확한 문제 의식이 있어 짧은 영상에서도 메시지가 빠르게 전달됩니다.', '대상과 반전이 분명해 초반 이탈을 줄일 수 있는 클립입니다.', '짧고 독립적인 문장으로 구성돼 빠른 소비에 적합합니다.', '공감과 궁금증을 동시에 만드는 설명형 클립입니다.', '비교 구조가 명확해 정보 전달형 숏폼으로 적합합니다.', '감정적 긴장감이 높아 후킹 제목과 함께 사용하기 좋습니다.'];
+  const total = Math.max(6, Number(project.duration) || 283);
+  const formatDuration = seconds => `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(Math.max(0, Math.round(seconds % 60))).padStart(2, '0')}`;
+  return titles.map((title, index) => { const start = Math.round(index * total / 6); const end = Math.max(start + 1, Math.round((index + 1) * total / 6)); return { id: `${project.id}-clip-0${index + 1}`, title, duration: formatDuration(end - start), viralScore: 99 - index, scoreReason: reasons[index], subtitleText: '핵심 메시지가 시작부터 선명하게 전달되는 추천 클립입니다.', start, end }; });
 };
 const analysisProvider = process.env.SKYCLIP_ANALYSIS_PROVIDER || 'local';
 const buildAnalysisState = (project, stage = 'queued') => ({ provider: analysisProvider, mode: analysisProvider === 'local' ? 'fallback' : 'external', stage, sourceType: project.sourceType || (project.source === 'local-video' ? 'upload' : 'url'), transcriptReady: stage === 'ready', highlightsReady: stage === 'ready' });

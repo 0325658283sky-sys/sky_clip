@@ -5,9 +5,10 @@ import { tmpdir } from 'node:os';
 
 const port = 18787;
 const base = `http://127.0.0.1:${port}`;
+const verifyDataFile = join(tmpdir(), `skyclip-verify-${process.pid}-${Date.now()}.json`);
 const child = spawn(process.execPath, ['server.mjs'], {
   cwd: new URL('.', import.meta.url),
-  env: { ...process.env, PORT: String(port), SKYCLIP_DATA_FILE: join(tmpdir(), 'skyclip-verify-data.json') },
+  env: { ...process.env, PORT: String(port), SKYCLIP_DATA_FILE: verifyDataFile },
   stdio: ['ignore', 'pipe', 'pipe']
 });
 let output = '';

@@ -21,29 +21,45 @@ const waitForServer = async () => {
   }
   throw new Error(`서버 시작 시간 초과\n${output}`);
 };
+const waitForProject = async (id, headers, predicate) => {
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    const project = await (await fetch(`${base}/api/projects/${id}`, { headers })).json();
+    if (predicate(project)) return project;
+    await new Promise(resolve => setTimeout(resolve, 250));
+  }
+  return await (await fetch(`${base}/api/projects/${id}`, { headers })).json();
+};
 
 try {
   await waitForServer();
   const health = await (await fetch(`${base}/api/health`)).json();
-  const session = await (await fetch(`${base}/api/session`, { headers: { 'x-workspace-id': 'verify-workspace' } })).json();
+  const workspaceHeaders = { 'x-workspace-id': 'verify-workspace' };
+  const isolatedHeaders = { 'x-workspace-id': 'isolated-workspace' };
+  const session = await (await fetch(`${base}/api/session`, { headers: workspaceHeaders })).json();
   const projects = await (await fetch(`${base}/api/projects`)).json();
   const isolatedProjects = await (await fetch(`${base}/api/projects`, { headers: { 'x-workspace-id': 'isolated-workspace' } })).json();
   const credits = await (await fetch(`${base}/api/credits`)).json();
-  const created = await (await fetch(`${base}/api/projects`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title: '결과 API 검증', source: 'https://example.com/video', creditCost: 0, requestId: `verify-${Date.now()}` }) })).json();
-  const upload = await (await fetch(`${base}/api/projects/${created.id}/source`, { method: 'POST', headers: { 'content-type': 'video/mp4', 'x-file-name': 'verify.mp4' }, body: await readFile(new URL('./test-input.mp4', import.meta.url)) })).json();
-  const assetRecord = await (await fetch(`${base}/api/projects/${created.id}/assets`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ type: '음악', prompt: 'verify-audio', fileName: 'verify-audio.mp4' }) })).json();
-  const assetFile = await (await fetch(`${base}/api/projects/${created.id}/assets/file`, { method: 'POST', headers: { 'content-type': 'video/mp4', 'x-file-name': 'verify-audio.mp4', 'x-asset-prompt': 'verify-audio' }, body: await readFile(new URL('./test-input.mp4', import.meta.url)) })).json();
-  await fetch(`${base}/api/projects/${created.id}/assets`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ type: '영상', prompt: 'verify-visual', fileName: 'verify-visual.mp4' }) });
-  const visualFile = await (await fetch(`${base}/api/projects/${created.id}/assets/file`, { method: 'POST', headers: { 'content-type': 'video/mp4', 'x-file-name': 'verify-visual.mp4', 'x-asset-prompt': 'verify-visual' }, body: await readFile(new URL('./test-input.mp4', import.meta.url)) })).json();
-  await fetch(`${base}/api/projects/${created.id}`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ editorState: { visualAsset: { type: '영상', prompt: 'verify-visual', fileName: 'verify-visual.mp4' }, clipStart: 0, clipEnd: 3 } }) });
-  await fetch(`${base}/api/projects/${created.id}/export`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ clipStart: 0, clipEnd: 3 }) });
-  await new Promise(resolve => setTimeout(resolve, 1800));
-  const renderedProject = await (await fetch(`${base}/api/projects/${created.id}`)).json();
+  const created = await (await fetch(`${base}/api/projects`, { method: 'POST', headers: { 'content-type': 'application/json', ...workspaceHeaders }, body: JSON.stringify({ title: '결과 API 검증', source: 'https://example.com/video', creditCost: 0, requestId: `verify-${Date.now()}` }) })).json();
+  const upload = await (await fetch(`${base}/api/projects/${created.id}/source`, { method: 'POST', headers: { 'content-type': 'video/mp4', 'x-file-name': 'verify.mp4', ...workspaceHeaders }, body: await readFile(new URL('./test-input.mp4', import.meta.url)) })).json();
+  const assetRecord = await (await fetch(`${base}/api/projects/${created.id}/assets`, { method: 'POST', headers: { 'content-type': 'application/json', ...workspaceHeaders }, body: JSON.stringify({ type: '음악', prompt: 'verify-audio', fileName: 'verify-audio.mp4' }) })).json();
+  const assetFile = await (await fetch(`${base}/api/projects/${created.id}/assets/file`, { method: 'POST', headers: { 'content-type': 'video/mp4', 'x-file-name': 'verify-audio.mp4', 'x-asset-prompt': 'verify-audio', ...workspaceHeaders }, body: await readFile(new URL('./test-input.mp4', import.meta.url)) })).json();
+  await fetch(`${base}/api/projects/${created.id}/assets`, { method: 'POST', headers: { 'content-type': 'application/json', ...workspaceHeaders }, body: JSON.stringify({ type: '영상', prompt: 'verify-visual', fileName: 'verify-visual.mp4' }) });
+  const visualFile = await (await fetch(`${base}/api/projects/${created.id}/assets/file`, { method: 'POST', headers: { 'content-type': 'video/mp4', 'x-file-name': 'verify-visual.mp4', 'x-asset-prompt': 'verify-visual', ...workspaceHeaders }, body: await readFile(new URL('./test-input.mp4', import.meta.url)) })).json();
+  await fetch(`${base}/api/projects/${created.id}`, { method: 'PUT', headers: { 'content-type': 'application/json', ...workspaceHeaders }, body: JSON.stringify({ editorState: { visualAsset: { type: '영상', prompt: 'verify-visual', fileName: 'verify-visual.mp4' }, clipStart: 0, clipEnd: 3 }, workspaceId: 'attacker-workspace' }) });
+  await fetch(`${base}/api/projects/${created.id}/export`, { method: 'POST', headers: { 'content-type': 'application/json', ...workspaceHeaders }, body: JSON.stringify({ clipStart: 0, clipEnd: 3 }) });
+  const renderedProject = await waitForProject(created.id, workspaceHeaders, project => ['processing', 'ready', 'failed'].includes(project.exportStatus));
   await new Promise(resolve => setTimeout(resolve, 1100));
-  const results = await (await fetch(`${base}/api/projects/${created.id}/results`)).json();
-  const analysis = await (await fetch(`${base}/api/projects/${created.id}/analysis`)).json();
-  const exportRequest = await (await fetch(`${base}/api/projects/${created.id}/export`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ clipStart: 12, clipEnd: 42 }) })).json();
-  const exportedProject = await (await fetch(`${base}/api/projects/${created.id}`)).json();
+  const results = await (await fetch(`${base}/api/projects/${created.id}/results`, { headers: workspaceHeaders })).json();
+  const analysis = await (await fetch(`${base}/api/projects/${created.id}/analysis`, { headers: workspaceHeaders })).json();
+  const exportRequest = await (await fetch(`${base}/api/projects/${created.id}/export`, { method: 'POST', headers: { 'content-type': 'application/json', ...workspaceHeaders }, body: JSON.stringify({ clipStart: 12, clipEnd: 42 }) })).json();
+  const exportedProject = await (await fetch(`${base}/api/projects/${created.id}`, { headers: workspaceHeaders })).json();
+  const crossWorkspaceChecks = await Promise.all([
+    fetch(`${base}/api/projects/${created.id}`, { headers: isolatedHeaders }),
+    fetch(`${base}/api/projects/${created.id}/reprocess`, { method: 'POST', headers: isolatedHeaders }),
+    fetch(`${base}/api/projects/${created.id}/captions`, { method: 'POST', headers: isolatedHeaders }),
+    fetch(`${base}/api/projects/${created.id}/assets`, { method: 'POST', headers: { 'content-type': 'application/json', ...isolatedHeaders }, body: '{}' }),
+    fetch(`${base}/api/projects/${created.id}/export`, { method: 'POST', headers: { 'content-type': 'application/json', ...isolatedHeaders }, body: '{}' })
+  ]);
   const checks = [
     ['health', health.ok === true && health.service === 'skyclip'],
     ['session', session.authenticated === false && session.authMode === 'workspace' && session.workspaceId === 'verify-workspace'],
@@ -55,7 +71,8 @@ try {
     ['source-upload', upload.ok === true && upload.project?.sourceType === 'upload' && Boolean(upload.project?.renderInput) && Number.isFinite(upload.project?.duration)],
     ['asset-file', assetRecord.prompt === 'verify-audio' && assetFile.ok === true && assetFile.assets?.some(asset => asset.prompt === 'verify-audio' && asset.filePath)],
     ['visual-composite', visualFile.ok === true && ['processing', 'ready'].includes(renderedProject.exportStatus)],
-    ['export-range', exportRequest.status === 'queued' && exportedProject.editorState?.clipStart === 12 && exportedProject.editorState?.clipEnd === 42]
+    ['export-range', exportRequest.status === 'queued' && exportedProject.editorState?.clipStart === 12 && exportedProject.editorState?.clipEnd === 42],
+    ['workspace-mutation-boundary', crossWorkspaceChecks.every(response => response.status === 404) && exportedProject.workspaceId === 'verify-workspace']
   ];
   for (const [name, ok] of checks) console.log(`${ok ? 'PASS' : 'FAIL'} API ${name}`);
   if (checks.some(([, ok]) => !ok)) process.exitCode = 1;

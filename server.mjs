@@ -88,9 +88,11 @@ const server = createServer(async (req, res) => {
     if (requestKey) creditRequests.set(requestKey, project);
     persist();
     if (isYoutubeUrl(project.source)) startYoutubeDownload(project);
-    setTimeout(() => { logProject(project.id, 'AI 분석을 시작했습니다.'); const current = projects.get(project.id); if (current) { projects.set(project.id, { ...current, status: 'processing', progress: 35, analysis: buildAnalysisState(current, 'transcribing') }); persist(); } }, 250);
-    setTimeout(() => { logProject(project.id, '하이라이트와 자막 후보를 분석 중입니다.'); const current = projects.get(project.id); if (current) { projects.set(project.id, { ...current, status: 'processing', progress: 72, analysis: buildAnalysisState(current, 'scoring') }); persist(); } }, 600);
-    setTimeout(() => { logProject(project.id, '분석이 완료되었습니다.'); const current = projects.get(project.id); if (current && current.sourceType !== 'youtube') { projects.set(project.id, completeAnalysis(current)); persist(); } }, 900);
+    else {
+      setTimeout(() => { logProject(project.id, 'AI 분석을 시작했습니다.'); const current = projects.get(project.id); if (current) { projects.set(project.id, { ...current, status: 'processing', progress: 35, analysis: buildAnalysisState(current, 'transcribing') }); persist(); } }, 250);
+      setTimeout(() => { logProject(project.id, '하이라이트와 자막 후보를 분석 중입니다.'); const current = projects.get(project.id); if (current) { projects.set(project.id, { ...current, status: 'processing', progress: 72, analysis: buildAnalysisState(current, 'scoring') }); persist(); } }, 600);
+      setTimeout(() => { logProject(project.id, '분석이 완료되었습니다.'); const current = projects.get(project.id); if (current) { projects.set(project.id, completeAnalysis(current)); persist(); } }, 900);
+    }
     return json(res, 201, project);
   }
   const match = url.pathname.match(/^\/api\/projects\/([^/]+)$/);

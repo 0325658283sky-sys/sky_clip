@@ -58,6 +58,9 @@ try {
     fetch(`${base}/api/projects/${created.id}/reprocess`, { method: 'POST', headers: isolatedHeaders }),
     fetch(`${base}/api/projects/${created.id}/captions`, { method: 'POST', headers: isolatedHeaders }),
     fetch(`${base}/api/projects/${created.id}/assets`, { method: 'POST', headers: { 'content-type': 'application/json', ...isolatedHeaders }, body: '{}' }),
+    fetch(`${base}/api/projects/${created.id}/assets`, { method: 'DELETE', headers: { 'content-type': 'application/json', ...isolatedHeaders }, body: JSON.stringify({ prompt: 'verify-audio' }) }),
+    fetch(`${base}/api/projects/${created.id}/refund`, { method: 'POST', headers: isolatedHeaders }),
+    fetch(`${base}/api/projects/${created.id}`, { method: 'PUT', headers: { 'content-type': 'application/json', ...isolatedHeaders }, body: JSON.stringify({ title: '침범 시도' }) }),
     fetch(`${base}/api/projects/${created.id}/export`, { method: 'POST', headers: { 'content-type': 'application/json', ...isolatedHeaders }, body: '{}' })
   ]);
   const checks = [

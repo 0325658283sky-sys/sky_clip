@@ -103,7 +103,7 @@ const server = createServer(async (req, res) => {
     try {
       await pipeline(req, createWriteStream(output));
       const metadata = await probeMedia(output);
-      const updated = { ...project, ...metadata, source: 'local-video', renderInput: output, sourceFile: req.headers['x-file-name'] || `${project.id}.${extension}`, sourceType: 'upload', updatedAt: new Date().toISOString() };
+      const updated = completeAnalysis({ ...project, ...metadata, source: 'local-video', renderInput: output, sourceFile: req.headers['x-file-name'] || `${project.id}.${extension}`, sourceType: 'upload', progress: 100, updatedAt: new Date().toISOString() });
       projects.set(project.id, updated); persist(); logProject(project.id, '영상 파일 업로드가 완료되었습니다.');
       return json(res, 201, { ok: true, project: updated });
     } catch (error) {

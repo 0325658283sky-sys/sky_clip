@@ -77,7 +77,7 @@ try {
     ['credits', Number.isFinite(credits.balance) && charged.id && chargedCredits.balance === credits.balance - 7 && isolatedCredits.balance === credits.balance],
     ['result-clips', Array.isArray(results.resultSet?.clips) && results.resultSet.clips.length === 6],
     ['analysis-state', analysis.analysis?.provider === 'local' && analysis.analysis?.stage === 'ready' && analysis.analysis.transcriptReady === true],
-    ['source-upload', upload.ok === true && upload.project?.sourceType === 'upload' && Boolean(upload.project?.renderInput) && Number.isFinite(upload.project?.duration)],
+    ['source-upload', upload.ok === true && upload.project?.sourceType === 'upload' && upload.project?.status === 'ready' && Boolean(upload.project?.renderInput) && Number.isFinite(upload.project?.duration)],
     ['source-preview', sourcePreview.ok && sourcePreview.headers.get('content-type')?.includes('video/mp4')],
     ['source-range', sourceRange.status === 206 && sourceRange.headers.get('content-range')?.startsWith('bytes 0-15/')],
     ['asset-file', assetRecord.prompt === 'verify-audio' && assetFile.ok === true && assetFile.assets?.some(asset => asset.prompt === 'verify-audio' && asset.filePath)],

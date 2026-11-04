@@ -41,6 +41,8 @@ try {
   const isolatedProjects = await (await fetch(`${base}/api/projects`, { headers: { 'x-workspace-id': 'isolated-workspace' } })).json();
   const credits = await (await fetch(`${base}/api/credits`)).json();
   const charged = await (await fetch(`${base}/api/projects`, { method: 'POST', headers: { 'content-type': 'application/json', ...workspaceHeaders }, body: JSON.stringify({ title: '크레딧 범위 검증', source: 'https://example.com/credit', creditCost: 7, requestId: `credit-${Date.now()}` }) })).json();
+  const duplicate = await (await fetch(`${base}/api/projects`, { method: 'POST', headers: { 'content-type': 'application/json', ...workspaceHeaders }, body: JSON.stringify({ title: '중복 요청 검증', source: 'https://example.com/duplicate', creditCost: 11, requestId: 'persisted-idempotency-check' }) })).json();
+  const duplicateRetry = await (await fetch(`${base}/api/projects`, { method: 'POST', headers: { 'content-type': 'application/json', ...workspaceHeaders }, body: JSON.stringify({ title: '중복 요청 검증 재시도', source: 'https://example.com/duplicate', creditCost: 11, requestId: 'persisted-idempotency-check' }) })).json();
   const chargedCredits = await (await fetch(`${base}/api/credits`, { headers: workspaceHeaders })).json();
   const isolatedCredits = await (await fetch(`${base}/api/credits`, { headers: isolatedHeaders })).json();
   const created = await (await fetch(`${base}/api/projects`, { method: 'POST', headers: { 'content-type': 'application/json', ...workspaceHeaders }, body: JSON.stringify({ title: '결과 API 검증', source: 'https://example.com/video', creditCost: 0, requestId: `verify-${Date.now()}` }) })).json();
@@ -74,7 +76,8 @@ try {
     ['session', session.authenticated === false && session.authMode === 'workspace' && session.workspaceId === 'verify-workspace'],
     ['projects', Array.isArray(projects.projects)],
     ['workspace-scope', Array.isArray(isolatedProjects.projects) && isolatedProjects.projects.length === 0],
-    ['credits', Number.isFinite(credits.balance) && charged.id && chargedCredits.balance === credits.balance - 7 && isolatedCredits.balance === credits.balance],
+    ['credits', Number.isFinite(credits.balance) && charged.id && chargedCredits.balance === credits.balance - 7 - 11 && isolatedCredits.balance === credits.balance],
+    ['request-idempotency', duplicate.id && duplicateRetry.id === duplicate.id],
     ['result-clips', Array.isArray(results.resultSet?.clips) && results.resultSet.clips.length === 6],
     ['analysis-state', analysis.analysis?.provider === 'local' && analysis.analysis?.stage === 'ready' && analysis.analysis.transcriptReady === true],
     ['source-upload', upload.ok === true && upload.project?.sourceType === 'upload' && upload.project?.status === 'ready' && Boolean(upload.project?.renderInput) && Number.isFinite(upload.project?.duration)],

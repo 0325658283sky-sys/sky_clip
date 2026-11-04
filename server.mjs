@@ -78,12 +78,14 @@ const server = createServer(async (req, res) => {
     const input = raw ? JSON.parse(raw) : {};
     const workspaceId = workspaceIdFromRequest(req);
     const requestKey = input.requestId ? `${workspaceId}:${input.requestId}` : null;
+    const persistedRequest = input.requestId ? [...projects.values()].find(project => project.workspaceId === workspaceId && project.requestId === input.requestId) : null;
+    if (persistedRequest) return json(res, 200, persistedRequest);
     if (requestKey && creditRequests.has(requestKey)) return json(res, 200, creditRequests.get(requestKey));
     const creditCost = Math.max(0, Number(input.creditCost || 0));
     const balance = workspaceBalance(workspaceId);
     if (creditCost > balance) return json(res, 402, { error: '크레딧이 부족합니다.', balance, required: creditCost });
     creditBalances.set(workspaceId, balance - creditCost);
-    const project = { id: randomUUID(), workspaceId, title: input.title || '새 프로젝트', source: input.source || null, sourceType: isYoutubeUrl(input.source) ? 'youtube' : (input.source === 'local-video' ? 'upload' : 'url'), creditCost, status: 'queued', progress: 0, analysis: buildAnalysisState({ source: input.source || null }, 'queued'), logs: [{ message: '프로젝트 생성 요청을 받았습니다.', at: new Date().toISOString() }], createdAt: new Date().toISOString() };
+    const project = { id: randomUUID(), workspaceId, requestId: input.requestId || null, title: input.title || '새 프로젝트', source: input.source || null, sourceType: isYoutubeUrl(input.source) ? 'youtube' : (input.source === 'local-video' ? 'upload' : 'url'), creditCost, status: 'queued', progress: 0, analysis: buildAnalysisState({ source: input.source || null }, 'queued'), logs: [{ message: '프로젝트 생성 요청을 받았습니다.', at: new Date().toISOString() }], createdAt: new Date().toISOString() };
     projects.set(project.id, project);
     if (requestKey) creditRequests.set(requestKey, project);
     persist();

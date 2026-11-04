@@ -78,5 +78,5 @@ YouTube 다운로드 시 자동 생성 자막을 우선 수집해 `captions`와 
 
 ## 작업공간 범위
 
-브라우저는 `skyclip_workspace` 쿠키를 사용하고, 서버는 프로젝트·목록·크레딧·상세 조회뿐 아니라 수정·환불·재분석·자막·자산 생성/삭제·렌더링·다운로드 같은 변경/다운로드 경로도 작업공간 ID 기준으로 제한한다. 현재 기본 작업공간은 `demo-workspace`이며 실제 로그인/인증 제공자 연결 시 이 값을 인증된 사용자 또는 workspace claim으로 교체한다.
+브라우저는 `skyclip_workspace` 쿠키를 사용하고, 서버는 프로젝트·목록·크레딧·상세 조회뿐 아니라 수정·환불·재분석·자막·자산 생성/삭제·렌더링·다운로드 같은 변경/다운로드 경로도 작업공간 ID 기준으로 제한한다. 크레딧 잔액과 프로젝트 생성 `requestId` 멱등성도 작업공간별로 분리한다. 현재 기본 작업공간은 `demo-workspace`이며 실제 로그인/인증 제공자 연결 시 이 값을 인증된 사용자 또는 workspace claim으로 교체한다.
 `GET /api/session`은 현재 세션의 `authenticated`, `authMode`, `workspaceId`를 반환한다. 현재 `authMode`는 `workspace`이며 외부 인증은 아직 연결하지 않는다.

@@ -39,6 +39,9 @@ try {
   const projects = await (await fetch(`${base}/api/projects`)).json();
   const isolatedProjects = await (await fetch(`${base}/api/projects`, { headers: { 'x-workspace-id': 'isolated-workspace' } })).json();
   const credits = await (await fetch(`${base}/api/credits`)).json();
+  const charged = await (await fetch(`${base}/api/projects`, { method: 'POST', headers: { 'content-type': 'application/json', ...workspaceHeaders }, body: JSON.stringify({ title: '크레딧 범위 검증', source: 'https://example.com/credit', creditCost: 7, requestId: `credit-${Date.now()}` }) })).json();
+  const chargedCredits = await (await fetch(`${base}/api/credits`, { headers: workspaceHeaders })).json();
+  const isolatedCredits = await (await fetch(`${base}/api/credits`, { headers: isolatedHeaders })).json();
   const created = await (await fetch(`${base}/api/projects`, { method: 'POST', headers: { 'content-type': 'application/json', ...workspaceHeaders }, body: JSON.stringify({ title: '결과 API 검증', source: 'https://example.com/video', creditCost: 0, requestId: `verify-${Date.now()}` }) })).json();
   const upload = await (await fetch(`${base}/api/projects/${created.id}/source`, { method: 'POST', headers: { 'content-type': 'video/mp4', 'x-file-name': 'verify.mp4', ...workspaceHeaders }, body: await readFile(new URL('./test-input.mp4', import.meta.url)) })).json();
   const assetRecord = await (await fetch(`${base}/api/projects/${created.id}/assets`, { method: 'POST', headers: { 'content-type': 'application/json', ...workspaceHeaders }, body: JSON.stringify({ type: '음악', prompt: 'verify-audio', fileName: 'verify-audio.mp4' }) })).json();
@@ -68,7 +71,7 @@ try {
     ['session', session.authenticated === false && session.authMode === 'workspace' && session.workspaceId === 'verify-workspace'],
     ['projects', Array.isArray(projects.projects)],
     ['workspace-scope', Array.isArray(isolatedProjects.projects) && isolatedProjects.projects.length === 0],
-    ['credits', Number.isFinite(credits.balance)],
+    ['credits', Number.isFinite(credits.balance) && charged.id && chargedCredits.balance === credits.balance - 7 && isolatedCredits.balance === credits.balance],
     ['result-clips', Array.isArray(results.resultSet?.clips) && results.resultSet.clips.length === 6],
     ['analysis-state', analysis.analysis?.provider === 'local' && analysis.analysis?.stage === 'ready' && analysis.analysis.transcriptReady === true],
     ['source-upload', upload.ok === true && upload.project?.sourceType === 'upload' && Boolean(upload.project?.renderInput) && Number.isFinite(upload.project?.duration)],

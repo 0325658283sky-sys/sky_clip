@@ -11,6 +11,7 @@ import { pipeline } from 'node:stream/promises';
 const projects = new Map();
 const creditRequests = new Map();
 let creditBalance = 300;
+const creditBalances = new Map();
 const root = fileURLToPath(new URL('.', import.meta.url));
 const dataFile = process.env.SKYCLIP_DATA_FILE || join(root, 'skyclip-data.json');
 await mkdir(join(root, 'renders'), { recursive: true });
@@ -19,12 +20,14 @@ const mime = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=u
 try {
   const saved = JSON.parse(await readFile(dataFile, 'utf8'));
   creditBalance = saved.creditBalance ?? 300;
+  for (const [workspaceId, balance] of Object.entries(saved.creditBalances || {})) creditBalances.set(workspaceId, Number(balance));
+  if (!creditBalances.size) creditBalances.set('demo-workspace', creditBalance);
   for (const project of saved.projects || []) projects.set(project.id, { workspaceId: project.workspaceId || 'demo-workspace', ...project });
 } catch (error) {
   console.warn(`[SkyClip] 저장 데이터 로드 실패: ${error?.message || error}. 기본 상태로 시작합니다.`);
 }
 let persistQueue = Promise.resolve();
-const persist = () => { persistQueue = persistQueue.then(async () => { const tempFile = `${dataFile}.tmp`; await writeFile(tempFile, JSON.stringify({ creditBalance, projects: [...projects.values()] }, null, 2), 'utf8'); await rename(tempFile, dataFile); }).catch(() => {}); return persistQueue; };
+const persist = () => { persistQueue = persistQueue.then(async () => { const tempFile = `${dataFile}.tmp`; await writeFile(tempFile, JSON.stringify({ creditBalance, creditBalances: Object.fromEntries(creditBalances), projects: [...projects.values()] }, null, 2), 'utf8'); await rename(tempFile, dataFile); }).catch(() => {}); return persistQueue; };
 const logProject = (id, message) => { const project = projects.get(id); if (!project) return; projects.set(id, { ...project, logs: [...(project.logs || []), { message, at: new Date().toISOString() }] }); persist(); };
 const buildResultClips = (project) => {
   const sourceLabel = project.source ? '분석 영상' : '새 프로젝트';
@@ -58,6 +61,7 @@ const json = (res, status, body) => {
 };
 const workspaceIdFromRequest = req => req.headers['x-workspace-id'] || String(req.headers.cookie || '').match(/(?:^|;\s*)skyclip_workspace=([^;]+)/)?.[1] || 'demo-workspace';
 const visibleProject = (req, id) => { const project = projects.get(id); return project && project.workspaceId === workspaceIdFromRequest(req) ? project : null; };
+const workspaceBalance = workspaceId => { if (!creditBalances.has(workspaceId)) creditBalances.set(workspaceId, creditBalance); return creditBalances.get(workspaceId); };
 
 const server = createServer(async (req, res) => {
   if (req.method === 'OPTIONS') { res.writeHead(204, { 'access-control-allow-origin': '*', 'access-control-allow-methods': 'GET,POST,PUT,DELETE,OPTIONS', 'access-control-allow-headers': 'content-type,x-workspace-id' }); return res.end(); }
@@ -71,17 +75,20 @@ const server = createServer(async (req, res) => {
   if (req.method === 'GET' && url.pathname === '/api/health') return json(res, 200, { ok: true, service: 'skyclip' });
   if (req.method === 'GET' && url.pathname === '/api/session') return json(res, 200, { authenticated: false, authMode: 'workspace', workspaceId: workspaceIdFromRequest(req), message: '외부 인증 제공자 연결 전 작업공간 모드로 동작합니다.' });
   if (req.method === 'GET' && url.pathname === '/api/projects') return json(res, 200, { projects: [...projects.values()].filter(project => project.workspaceId === workspaceIdFromRequest(req)) });
-  if (req.method === 'GET' && url.pathname === '/api/credits') return json(res, 200, { balance: creditBalance, usage: [...projects.values()].filter(project => project.workspaceId === workspaceIdFromRequest(req) && project.creditCost).map(project => ({ projectId: project.id, title: project.title, cost: project.creditCost, createdAt: project.updatedAt || project.createdAt })) });
+  if (req.method === 'GET' && url.pathname === '/api/credits') { const workspaceId = workspaceIdFromRequest(req); return json(res, 200, { balance: workspaceBalance(workspaceId), usage: [...projects.values()].filter(project => project.workspaceId === workspaceId && project.creditCost).map(project => ({ projectId: project.id, title: project.title, cost: project.creditCost, createdAt: project.updatedAt || project.createdAt })) }); }
   if (req.method === 'POST' && url.pathname === '/api/projects') {
     let raw = ''; for await (const chunk of req) raw += chunk;
     const input = raw ? JSON.parse(raw) : {};
-    if (input.requestId && creditRequests.has(input.requestId)) return json(res, 200, creditRequests.get(input.requestId));
+    const workspaceId = workspaceIdFromRequest(req);
+    const requestKey = input.requestId ? `${workspaceId}:${input.requestId}` : null;
+    if (requestKey && creditRequests.has(requestKey)) return json(res, 200, creditRequests.get(requestKey));
     const creditCost = Math.max(0, Number(input.creditCost || 0));
-    if (creditCost > creditBalance) return json(res, 402, { error: '크레딧이 부족합니다.', balance: creditBalance, required: creditCost });
-    creditBalance -= creditCost;
-    const project = { id: randomUUID(), workspaceId: workspaceIdFromRequest(req), title: input.title || '새 프로젝트', source: input.source || null, sourceType: isYoutubeUrl(input.source) ? 'youtube' : (input.source === 'local-video' ? 'upload' : 'url'), creditCost, status: 'queued', progress: 0, analysis: buildAnalysisState({ source: input.source || null }, 'queued'), logs: [{ message: '프로젝트 생성 요청을 받았습니다.', at: new Date().toISOString() }], createdAt: new Date().toISOString() };
+    const balance = workspaceBalance(workspaceId);
+    if (creditCost > balance) return json(res, 402, { error: '크레딧이 부족합니다.', balance, required: creditCost });
+    creditBalances.set(workspaceId, balance - creditCost);
+    const project = { id: randomUUID(), workspaceId, title: input.title || '새 프로젝트', source: input.source || null, sourceType: isYoutubeUrl(input.source) ? 'youtube' : (input.source === 'local-video' ? 'upload' : 'url'), creditCost, status: 'queued', progress: 0, analysis: buildAnalysisState({ source: input.source || null }, 'queued'), logs: [{ message: '프로젝트 생성 요청을 받았습니다.', at: new Date().toISOString() }], createdAt: new Date().toISOString() };
     projects.set(project.id, project);
-    if (input.requestId) creditRequests.set(input.requestId, project);
+    if (requestKey) creditRequests.set(requestKey, project);
     persist();
     if (isYoutubeUrl(project.source)) startYoutubeDownload(project);
     setTimeout(() => { logProject(project.id, 'AI 분석을 시작했습니다.'); const current = projects.get(project.id); if (current) { projects.set(project.id, { ...current, status: 'processing', progress: 35, analysis: buildAnalysisState(current, 'transcribing') }); persist(); } }, 250);
@@ -143,8 +150,8 @@ const server = createServer(async (req, res) => {
     const project = visibleProject(req, refundJob[1]);
     if (!project) return json(res, 404, { error: '프로젝트를 찾을 수 없습니다.' });
     if (project.creditRefunded || !project.creditCost) return json(res, 200, { ok: true, balance: creditBalance, refunded: false });
-    creditBalance += Number(project.creditCost); logProject(project.id, '처리 실패로 크레딧을 환불했습니다.'); projects.set(project.id, { ...project, creditRefunded: true, status: 'failed' }); persist();
-    return json(res, 200, { ok: true, balance: creditBalance, refunded: true });
+    const workspaceId = workspaceIdFromRequest(req); const refundedBalance = workspaceBalance(workspaceId) + Number(project.creditCost); creditBalances.set(workspaceId, refundedBalance); logProject(project.id, '처리 실패로 크레딧을 환불했습니다.'); projects.set(project.id, { ...project, creditRefunded: true, status: 'failed' }); persist();
+    return json(res, 200, { ok: true, balance: refundedBalance, refunded: true });
   }
   if (req.method === 'POST' && reprocess) {
     const id = reprocess[1];

@@ -1,6 +1,6 @@
 import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
-import { readFile, writeFile, mkdir, rename } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, rename, stat } from 'node:fs/promises';
 import { extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
@@ -114,8 +114,17 @@ const server = createServer(async (req, res) => {
   if (req.method === 'GET' && sourcePreviewJob) {
     const project = visibleProject(req, sourcePreviewJob[1]);
     if (!project?.renderInput) return json(res, 404, { error: '원본 영상이 아직 준비되지 않았습니다.' });
-    res.writeHead(200, { 'content-type': 'video/mp4', 'accept-ranges': 'bytes' });
-    return createReadStream(project.renderInput).pipe(res);
+    try {
+      const fileStats = await stat(project.renderInput);
+      const range = String(req.headers.range || '');
+      const match = range.match(/bytes=(\d*)-(\d*)/);
+      if (!match) { res.writeHead(200, { 'content-type': 'video/mp4', 'accept-ranges': 'bytes', 'content-length': fileStats.size }); return createReadStream(project.renderInput).pipe(res); }
+      const start = match[1] ? Number(match[1]) : Math.max(0, fileStats.size - Number(match[2] || 1024 * 1024));
+      const end = match[2] ? Math.min(fileStats.size - 1, Number(match[2])) : Math.min(fileStats.size - 1, start + 1024 * 1024 - 1);
+      if (!Number.isFinite(start) || !Number.isFinite(end) || start > end || start >= fileStats.size) { res.writeHead(416, { 'content-range': `bytes */${fileStats.size}` }); return res.end(); }
+      res.writeHead(206, { 'content-type': 'video/mp4', 'accept-ranges': 'bytes', 'content-range': `bytes ${start}-${end}/${fileStats.size}`, 'content-length': end - start + 1 });
+      return createReadStream(project.renderInput, { start, end }).pipe(res);
+    } catch (error) { return json(res, 404, { error: '원본 영상 파일을 찾을 수 없습니다.' }); }
   }
   const assetFileJob = url.pathname.match(/^\/api\/projects\/([^/]+)\/assets\/file$/);
   if (req.method === 'POST' && assetFileJob) {

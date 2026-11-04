@@ -45,6 +45,7 @@ try {
   const isolatedCredits = await (await fetch(`${base}/api/credits`, { headers: isolatedHeaders })).json();
   const created = await (await fetch(`${base}/api/projects`, { method: 'POST', headers: { 'content-type': 'application/json', ...workspaceHeaders }, body: JSON.stringify({ title: '결과 API 검증', source: 'https://example.com/video', creditCost: 0, requestId: `verify-${Date.now()}` }) })).json();
   const upload = await (await fetch(`${base}/api/projects/${created.id}/source`, { method: 'POST', headers: { 'content-type': 'video/mp4', 'x-file-name': 'verify.mp4', ...workspaceHeaders }, body: await readFile(new URL('./test-input.mp4', import.meta.url)) })).json();
+  const sourcePreview = await fetch(`${base}/api/projects/${created.id}/source`, { headers: workspaceHeaders });
   const assetRecord = await (await fetch(`${base}/api/projects/${created.id}/assets`, { method: 'POST', headers: { 'content-type': 'application/json', ...workspaceHeaders }, body: JSON.stringify({ type: '음악', prompt: 'verify-audio', fileName: 'verify-audio.mp4' }) })).json();
   const assetFile = await (await fetch(`${base}/api/projects/${created.id}/assets/file`, { method: 'POST', headers: { 'content-type': 'video/mp4', 'x-file-name': 'verify-audio.mp4', 'x-asset-prompt': 'verify-audio', ...workspaceHeaders }, body: await readFile(new URL('./test-input.mp4', import.meta.url)) })).json();
   await fetch(`${base}/api/projects/${created.id}/assets`, { method: 'POST', headers: { 'content-type': 'application/json', ...workspaceHeaders }, body: JSON.stringify({ type: '영상', prompt: 'verify-visual', fileName: 'verify-visual.mp4' }) });
@@ -76,6 +77,7 @@ try {
     ['result-clips', Array.isArray(results.resultSet?.clips) && results.resultSet.clips.length === 6],
     ['analysis-state', analysis.analysis?.provider === 'local' && analysis.analysis?.stage === 'ready' && analysis.analysis.transcriptReady === true],
     ['source-upload', upload.ok === true && upload.project?.sourceType === 'upload' && Boolean(upload.project?.renderInput) && Number.isFinite(upload.project?.duration)],
+    ['source-preview', sourcePreview.ok && sourcePreview.headers.get('content-type')?.includes('video/mp4')],
     ['asset-file', assetRecord.prompt === 'verify-audio' && assetFile.ok === true && assetFile.assets?.some(asset => asset.prompt === 'verify-audio' && asset.filePath)],
     ['visual-composite', visualFile.ok === true && ['processing', 'ready'].includes(renderedProject.exportStatus)],
     ['export-range', exportRequest.status === 'queued' && exportedProject.editorState?.clipStart === 12 && exportedProject.editorState?.clipEnd === 42],

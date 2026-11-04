@@ -75,6 +75,7 @@
 YouTube 다운로드 시 자동 생성 자막을 우선 수집해 `captions`와 `captionCues`로 저장하며, 자막이 없으면 local fallback 후보를 사용한다.
 
 `POST /api/projects/:id/assets/file`은 자산 파일 본문을 서버에 저장하고 `x-file-name`, `x-asset-prompt` 헤더로 프로젝트 자산과 연결한다. 오디오 자산은 FFmpeg 내보내기 시 원본 영상과 합성된다.
+`GET /api/projects/:id/source`는 현재 작업공간에 속한 프로젝트의 서버 원본 영상을 결과 미리보기용으로 스트리밍한다. 원본이 준비되지 않았거나 다른 작업공간이면 404를 반환한다.
 
 ## 작업공간 범위
 

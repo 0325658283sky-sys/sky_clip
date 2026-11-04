@@ -110,6 +110,13 @@ const server = createServer(async (req, res) => {
       return json(res, 400, { error: `영상 업로드에 실패했습니다: ${error?.message || error}` });
     }
   }
+  const sourcePreviewJob = url.pathname.match(/^\/api\/projects\/([^/]+)\/source$/);
+  if (req.method === 'GET' && sourcePreviewJob) {
+    const project = visibleProject(req, sourcePreviewJob[1]);
+    if (!project?.renderInput) return json(res, 404, { error: '원본 영상이 아직 준비되지 않았습니다.' });
+    res.writeHead(200, { 'content-type': 'video/mp4', 'accept-ranges': 'bytes' });
+    return createReadStream(project.renderInput).pipe(res);
+  }
   const assetFileJob = url.pathname.match(/^\/api\/projects\/([^/]+)\/assets\/file$/);
   if (req.method === 'POST' && assetFileJob) {
     const project = visibleProject(req, assetFileJob[1]);

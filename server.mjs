@@ -42,6 +42,21 @@ const buildResultClips = (project) => {
   const formatDuration = seconds => `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(Math.max(0, Math.round(seconds % 60))).padStart(2, '0')}`;
   return titles.map((title, index) => { const start = Math.round(index * total / 6); const end = Math.max(start + 1, Math.round((index + 1) * total / 6)); const cueText = (project.captionCues || []).map((cue, cueIndex) => cue.end > start && cue.start < end ? project.captions?.[cueIndex] : '').filter(Boolean).join(' '); return { id: `${project.id}-clip-0${index + 1}`, title, duration: formatDuration(end - start), viralScore: 99 - index, scoreReason: reasons[index], subtitleText: cueText || project.captions?.[index] || '핵심 메시지가 시작부터 선명하게 전달되는 추천 클립입니다.', start, end }; });
 };
+const extractResultClips = async project => {
+  if (!project.renderInput) return project;
+  const clips = buildResultClips(project);
+  const extracted = [];
+  for (const clip of clips.slice(0, 6)) {
+    const output = join(renderDir, `${project.id}-${clip.id}.mp4`);
+    const duration = Math.max(0.5, clip.end - clip.start);
+    await new Promise(resolve => {
+      const child = spawn(process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg', ['-y', '-ss', String(clip.start), '-i', project.renderInput, '-t', String(duration), '-vf', 'scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-c:a', 'aac', '-movflags', '+faststart', output], { stdio: ['ignore', 'ignore', 'ignore'] });
+      child.on('close', code => { if (code === 0) extracted.push({ ...clip, previewUrl: `/api/projects/${project.id}/results/${clip.id}` }); resolve(); });
+      child.on('error', () => resolve());
+    });
+  }
+  return extracted.length ? { ...project, resultSet: { ...(project.resultSet || {}), clips: extracted } } : project;
+};
 const sttUrl = process.env.SKYCLIP_STT_URL || '';
 const analysisProvider = process.env.SKYCLIP_ANALYSIS_PROVIDER || (sttUrl ? 'external-stt' : 'local');
 const sttToken = process.env.SKYCLIP_STT_TOKEN || '';
@@ -57,7 +72,7 @@ const parseVtt = raw => raw.split(/\r?\n\r?\n/).map(block => { const lines = blo
 const collectYoutubeCaptions = project => new Promise(resolve => { const pattern = join(root, 'uploads', `${project.id}.%(ext)s`); const child = spawn('yt-dlp', ['--no-playlist', '--write-auto-subs', '--sub-langs', 'ko,en', '--sub-format', 'vtt', '--skip-download', '-o', pattern, project.source], { stdio: ['ignore', 'ignore', 'ignore'] }); child.on('close', async () => { for (const language of ['ko', 'en']) { try { const raw = await readFile(join(root, 'uploads', `${project.id}.${language}.vtt`), 'utf8'); const cues = parseVtt(raw); if (cues.length) return resolve({ captions: cues.map(cue => cue.text), captionCues: cues.map(({ start, end }) => ({ start, end })) }); } catch {} } resolve({ captions: [], captionCues: [] }); }); child.on('error', () => resolve({ captions: [], captionCues: [] })); });
 const completeAnalysis = project => { const clips = buildResultClips(project); const captions = project.captions?.length ? project.captions : clips.slice(0, 3).map(clip => clip.subtitleText); const captionCues = project.captionCues?.length ? project.captionCues : clips.slice(0, 3).map(clip => ({ start: clip.start, end: clip.end })); return { ...project, status: 'ready', progress: 100, analysis: buildAnalysisState(project, 'ready'), captions, captionCues, resultSet: { sourceVideo: { title: project.title, source: project.source }, clips } }; };
 const requestExternalTranscript = async project => { if (!sttUrl || !project.renderInput) return null; try { const buffer = await readFile(project.renderInput); const form = new FormData(); form.append('file', new Blob([buffer], { type: 'video/mp4' }), project.sourceFile || `${project.id}.mp4`); const headers = sttToken ? { authorization: `Bearer ${sttToken}` } : {}; const response = await fetch(sttUrl, { method: 'POST', headers, body: form, signal: AbortSignal.timeout(sttTimeoutMs) }); if (!response.ok) throw new Error(`STT gateway ${response.status}`); const payload = await response.json(); const captions = Array.isArray(payload.captions) ? payload.captions.filter(Boolean).map(String) : []; const captionCues = Array.isArray(payload.captionCues) ? payload.captionCues.map(cue => ({ start: Number(cue.start) || 0, end: Number(cue.end) || 0 })).filter(cue => cue.end > cue.start) : []; return captions.length ? { captions, captionCues } : null; } catch (error) { console.warn(`[SkyClip] 외부 STT 실패, 로컬 폴백으로 전환: ${error?.message || error}`); return null; } };
-const completeAnalysisWithProvider = async project => { const transcript = await requestExternalTranscript(project); if (sttUrl && !transcript) logProject(project.id, '외부 STT 응답을 사용하지 못해 로컬 자막 폴백을 적용했습니다.'); if (transcript) logProject(project.id, '외부 STT 자막과 타임코드를 분석에 반영했습니다.'); const current = projects.get(project.id) || {}; return completeAnalysis({ ...current, ...project, ...(transcript || {}), logs: projects.get(project.id)?.logs || project.logs || [] }); };
+const completeAnalysisWithProvider = async project => { const transcript = await requestExternalTranscript(project); if (sttUrl && !transcript) logProject(project.id, '외부 STT 응답을 사용하지 못해 로컬 자막 폴백을 적용했습니다.'); if (transcript) logProject(project.id, '외부 STT 자막과 타임코드를 분석에 반영했습니다.'); const current = projects.get(project.id) || {}; const analyzed = completeAnalysis({ ...current, ...project, ...(transcript || {}), logs: projects.get(project.id)?.logs || project.logs || [] }); const withClips = await extractResultClips(analyzed); return withClips; };
 const startYoutubeDownload = project => {
   const output = join(root, 'uploads', `${project.id}.mp4`);
   const downloading = { ...project, sourceType: 'youtube', status: 'processing', progress: 15, analysis: buildAnalysisState(project, 'downloading') };
@@ -167,6 +182,14 @@ const server = createServer(async (req, res) => {
     try { await pipeline(req, createWriteStream(output)); const prompt = req.headers['x-asset-prompt'] || ''; const assets = (project.assets || []).map(asset => asset.prompt === prompt ? { ...asset, filePath: output } : asset); const updated = { ...project, assets }; projects.set(project.id, updated); persist(); return json(res, 201, { ok: true, filePath: output, assets }); } catch (error) { return json(res, 400, { error: `자산 업로드에 실패했습니다: ${error?.message || error}` }); }
   }
   const resultsJob = url.pathname.match(/^\/api\/projects\/([^/]+)\/results$/);
+  const resultClipJob = url.pathname.match(/^\/api\/projects\/([^/]+)\/results\/([^/]+)$/);
+  if (req.method === 'GET' && resultClipJob) {
+    const project = visibleProject(req, resultClipJob[1]);
+    const clip = project?.resultSet?.clips?.find(item => item.id === resultClipJob[2]);
+    const output = clip ? join(renderDir, `${project.id}-${clip.id}.mp4`) : null;
+    if (!project || !clip || !output) return json(res, 404, { error: '결과 클립을 찾을 수 없습니다.' });
+    try { const info = await stat(output); res.writeHead(200, { 'content-type': 'video/mp4', 'content-length': info.size, 'accept-ranges': 'bytes' }); return createReadStream(output).pipe(res); } catch { return json(res, 404, { error: '결과 클립 파일이 아직 준비되지 않았습니다.' }); }
+  }
   if (req.method === 'GET' && resultsJob) {
     const project = visibleProject(req, resultsJob[1]);
     if (!project) return json(res, 404, { error: '프로젝트를 찾을 수 없습니다.' });

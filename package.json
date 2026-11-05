@@ -10,6 +10,7 @@
     "check": "node --check app.js && node --check server.mjs && node --check render.mjs",
     "render": "node render.mjs",
     "verify": "node verify.mjs",
-    "verify:api": "node verify-api.mjs"
+    "verify:api": "node verify-api.mjs",
+    "verify:stt": "node verify-stt.mjs"
   }
 }

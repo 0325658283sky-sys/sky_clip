@@ -40,6 +40,7 @@ const buildResultClips = (project) => {
 const analysisProvider = process.env.SKYCLIP_ANALYSIS_PROVIDER || 'local';
 const buildAnalysisState = (project, stage = 'queued') => ({ provider: analysisProvider, mode: analysisProvider === 'local' ? 'fallback' : 'external', stage, sourceType: project.sourceType || (project.source === 'local-video' ? 'upload' : 'url'), transcriptReady: stage === 'ready', highlightsReady: stage === 'ready' });
 const isYoutubeUrl = value => /(?:youtube\.com|youtu\.be)/i.test(String(value || ''));
+const isHttpUrl = value => { try { const url = new URL(String(value || '')); return ['http:', 'https:'].includes(url.protocol); } catch { return false; } };
 const probeMedia = file => new Promise(resolve => { const child = spawn('ffprobe', ['-v', 'error', '-show_entries', 'format=duration:stream=width,height', '-of', 'json', file], { stdio: ['ignore', 'pipe', 'ignore'] }); let raw = ''; child.stdout.on('data', chunk => { raw += String(chunk); }); child.on('close', () => { try { const parsed = JSON.parse(raw); const stream = parsed.streams?.find(item => item.width || item.height) || {}; resolve({ duration: Number(parsed.format?.duration) || null, width: Number(stream.width) || null, height: Number(stream.height) || null }); } catch { resolve({ duration: null, width: null, height: null }); } }); child.on('error', () => resolve({ duration: null, width: null, height: null })); });
 const exportFormats = { '9:16': [1080, 1920], '1:1': [1080, 1080], '16:9': [1920, 1080] };
 const getExportFormat = value => exportFormats[value] ? value : '9:16';
@@ -78,6 +79,7 @@ const server = createServer(async (req, res) => {
   if (req.method === 'POST' && url.pathname === '/api/projects') {
     let raw = ''; for await (const chunk of req) raw += chunk;
     const input = raw ? JSON.parse(raw) : {};
+    if (input.source && input.source !== 'local-video' && !isHttpUrl(input.source)) return json(res, 400, { error: 'http 또는 https 형식의 영상 링크를 입력해 주세요.' });
     const workspaceId = workspaceIdFromRequest(req);
     const requestKey = input.requestId ? `${workspaceId}:${input.requestId}` : null;
     const persistedRequest = input.requestId ? [...projects.values()].find(project => project.workspaceId === workspaceId && project.requestId === input.requestId) : null;

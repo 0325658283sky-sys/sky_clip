@@ -74,3 +74,5 @@ npm run qa:full
 4. 실제 오디오 파일 업로드·FFmpeg 믹싱 연결
 5. 결제/크레딧 정책과 운영 모니터링 추가
 
+운영 전환 잔여 항목은 `PRODUCTION_GAPS.md`에 정리되어 있습니다.
+

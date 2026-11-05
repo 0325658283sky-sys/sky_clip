@@ -252,10 +252,10 @@ const server = createServer(async (req, res) => {
       const visualAssetPath = visualAssetRecord?.filePath || null;
       const inputArgs = ['-i', project.renderInput];
       const [width, height] = exportFormats[format];
-      let filterArgs = ['-vf', `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black`];
+      let filterArgs = ['-vf', `scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height}`];
       let videoMapArgs = [];
       let audioMapArgs = ['-c:a', 'aac'];
-      if (visualAssetPath) { inputArgs.push(...(visualAsset.type?.includes('이미지') ? ['-loop', '1', '-i', visualAssetPath] : ['-stream_loop', '-1', '-i', visualAssetPath])); const assetWidth = Math.round(width * 0.833); filterArgs = ['-filter_complex', `[0:v]scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black[base];[1:v]scale=${assetWidth}:-2[asset];[base][asset]overlay=(W-w)/2:(H-h)/2:enable=\'between(t,0,99999)\'[v]`]; videoMapArgs = ['-map', '[v]']; }
+      if (visualAssetPath) { inputArgs.push(...(visualAsset.type?.includes('이미지') ? ['-loop', '1', '-i', visualAssetPath] : ['-stream_loop', '-1', '-i', visualAssetPath])); const assetWidth = Math.round(width * 0.833); filterArgs = ['-filter_complex', `[0:v]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height}[base];[1:v]scale=${assetWidth}:-2[asset];[base][asset]overlay=(W-w)/2:(H-h)/2:enable=\'between(t,0,99999)\'[v]`]; videoMapArgs = ['-map', '[v]']; }
       if (audioAssetPath) { const audioIndex = visualAssetPath ? '2' : '1'; inputArgs.push('-i', audioAssetPath); audioMapArgs = ['-map', `${audioIndex}:a:0`, '-shortest']; }
       const child = spawn(process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg', ['-y', ...trimArgs, ...inputArgs, ...filterArgs, ...videoMapArgs, ...(audioAssetPath ? audioMapArgs : ['-map', '0:a?','-c:a', 'aac']), '-c:v', 'libx264', '-preset', 'medium', '-crf', '20', '-movflags', '+faststart', output], { stdio: ['ignore', 'ignore', 'pipe'] });
       projects.set(id, { ...project, exportStatus: 'processing', exportOutput: output, exportProgress: 1 }); persist(); logProject(id, 'FFmpeg 렌더링을 시작했습니다.');

@@ -13,6 +13,7 @@ const creditRequests = new Map();
 let creditBalance = 300;
 const creditBalances = new Map();
 const root = fileURLToPath(new URL('.', import.meta.url));
+const maxUploadBytes = 4 * 1024 * 1024 * 1024;
 const dataFile = process.env.SKYCLIP_DATA_FILE || join(root, 'skyclip-data.json');
 await mkdir(join(root, 'renders'), { recursive: true });
 await mkdir(join(root, 'uploads'), { recursive: true });
@@ -112,6 +113,7 @@ const server = createServer(async (req, res) => {
   if (req.method === 'POST' && sourceJob) {
     const project = visibleProject(req, sourceJob[1]);
     if (!project) return json(res, 404, { error: '프로젝트를 찾을 수 없습니다.' });
+    if (Number(req.headers['content-length']) > maxUploadBytes) return json(res, 413, { error: '업로드 가능한 영상은 최대 4GB입니다.' });
     const extension = (req.headers['x-file-name'] || '').toLowerCase().match(/\.(mp4|mov|webm)$/)?.[1] || 'mp4';
     const output = join(root, 'uploads', `${project.id}.${extension}`);
     try {

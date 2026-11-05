@@ -76,7 +76,7 @@ try {
   ]);
   const checks = [
     ['health', health.ok === true && health.service === 'skyclip'],
-    ['capabilities', capabilities.analysisProvider === 'local' && capabilities.youtube === true && capabilities.ffmpeg === true && capabilities.authMode === 'workspace'],
+    ['capabilities', capabilities.analysisProvider === 'local' && capabilities.youtube === true && capabilities.ffmpeg === true && capabilities.storageMode === 'local-directory' && capabilities.authMode === 'workspace'],
     ['session', session.authenticated === false && session.authMode === 'workspace' && session.workspaceId === 'verify-workspace'],
     ['projects', Array.isArray(projects.projects)],
     ['workspace-scope', Array.isArray(isolatedProjects.projects) && isolatedProjects.projects.length === 0],

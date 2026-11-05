@@ -273,5 +273,8 @@ server.on('error', error => {
   console.error('SkyClip 서버 시작 실패:', error);
   process.exitCode = 1;
 });
+const shutdown = signal => { console.log(`[SkyClip] ${signal} 수신, 서버를 안전하게 종료합니다.`); server.close(() => process.exit(0)); setTimeout(() => process.exit(1), 5000).unref(); };
+process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('SIGTERM', () => shutdown('SIGTERM'));
 server.listen(port, '0.0.0.0', () => console.log(`SkyClip API listening on http://localhost:${port}`));
 

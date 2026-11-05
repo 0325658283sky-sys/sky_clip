@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "start": "node server.mjs",
+    "start:stable": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-skyclip.ps1",
     "start:api": "node server.mjs",
     "qa": "npm run check && npm run verify",
     "check": "node --check app.js && node --check server.mjs && node --check render.mjs",

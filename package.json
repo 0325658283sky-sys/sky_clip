@@ -7,12 +7,13 @@
     "start:stable": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-skyclip.ps1",
     "start:api": "node server.mjs",
     "qa": "npm run check && npm run verify",
-    "qa:full": "npm run qa && npm run verify:api && npm run verify:stt && npm run verify:auth",
+    "qa:full": "npm run qa && npm run verify:api && npm run verify:stt && npm run verify:auth && npm run verify:storage",
     "check": "node --check app.js && node --check server.mjs && node --check render.mjs",
     "render": "node render.mjs",
     "verify": "node verify.mjs",
     "verify:api": "node verify-api.mjs",
     "verify:stt": "node verify-stt.mjs",
-    "verify:auth": "node verify-auth.mjs"
+    "verify:auth": "node verify-auth.mjs",
+    "verify:storage": "node verify-storage.mjs"
   }
 }

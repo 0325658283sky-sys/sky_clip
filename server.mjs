@@ -15,9 +15,11 @@ let creditBalance = 300;
 const creditBalances = new Map();
 const root = fileURLToPath(new URL('.', import.meta.url));
 const maxUploadBytes = 4 * 1024 * 1024 * 1024;
+const uploadDir = process.env.SKYCLIP_UPLOAD_DIR || join(root, 'uploads');
+const renderDir = process.env.SKYCLIP_RENDER_DIR || join(root, 'renders');
 const dataFile = process.env.SKYCLIP_DATA_FILE || join(root, 'skyclip-data.json');
-await mkdir(join(root, 'renders'), { recursive: true });
-await mkdir(join(root, 'uploads'), { recursive: true });
+await mkdir(renderDir, { recursive: true });
+await mkdir(uploadDir, { recursive: true });
 const mime = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.json': 'application/json; charset=utf-8' };
 try {
   const saved = JSON.parse(await readFile(dataFile, 'utf8'));

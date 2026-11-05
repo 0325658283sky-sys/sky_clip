@@ -34,6 +34,7 @@ const waitForProject = async (id, headers, predicate) => {
 try {
   await waitForServer();
   const health = await (await fetch(`${base}/api/health`)).json();
+  const capabilities = await (await fetch(`${base}/api/capabilities`)).json();
   const workspaceHeaders = { 'x-workspace-id': 'verify-workspace' };
   const isolatedHeaders = { 'x-workspace-id': 'isolated-workspace' };
   const session = await (await fetch(`${base}/api/session`, { headers: workspaceHeaders })).json();
@@ -75,6 +76,7 @@ try {
   ]);
   const checks = [
     ['health', health.ok === true && health.service === 'skyclip'],
+    ['capabilities', capabilities.analysisProvider === 'local' && capabilities.youtube === true && capabilities.ffmpeg === true && capabilities.authMode === 'workspace'],
     ['session', session.authenticated === false && session.authMode === 'workspace' && session.workspaceId === 'verify-workspace'],
     ['projects', Array.isArray(projects.projects)],
     ['workspace-scope', Array.isArray(isolatedProjects.projects) && isolatedProjects.projects.length === 0],

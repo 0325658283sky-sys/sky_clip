@@ -234,8 +234,7 @@ const server = createServer(async (req, res) => {
     if (!visible) return json(res, 404, { error: '프로젝트를 찾을 수 없습니다.' });
     const project = { ...visible, status: 'queued', progress: 0, reprocessRequestedAt: new Date().toISOString() };
     projects.set(id, project); persist();
-    setTimeout(() => { const current = projects.get(id); if (current) { projects.set(id, { ...current, status: 'processing', progress: 45 }); persist(); } }, 250);
-    setTimeout(() => { const current = projects.get(id); if (current) { projects.set(id, { ...current, status: 'ready', progress: 100 }); persist(); } }, 700);
+    setTimeout(async () => { const current = projects.get(id); if (!current) return; projects.set(id, { ...current, status: 'processing', progress: 45, analysis: buildAnalysisState(current, 'segmenting') }); persist(); if (current.renderInput) { const refreshed = await completeAnalysisWithProvider(current); projects.set(id, refreshed); persist(); logProject(id, '실제 원본에서 결과 클립을 다시 생성했습니다.'); return; } const latest = projects.get(id); if (latest) { projects.set(id, completeAnalysis(latest)); persist(); } }, 250);
     return json(res, 202, project);
   }
   const captionsJob = url.pathname.match(/^\/api\/projects\/([^/]+)\/captions$/);

@@ -1,5 +1,6 @@
 import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
+import { createHmac, timingSafeEqual } from 'node:crypto';
 import { readFile, writeFile, mkdir, rename, stat, unlink } from 'node:fs/promises';
 import { extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -45,6 +46,7 @@ const sttUrl = process.env.SKYCLIP_STT_URL || '';
 const analysisProvider = process.env.SKYCLIP_ANALYSIS_PROVIDER || (sttUrl ? 'external-stt' : 'local');
 const sttToken = process.env.SKYCLIP_STT_TOKEN || '';
 const sttTimeoutMs = Math.max(5000, Number(process.env.SKYCLIP_STT_TIMEOUT_MS || 120000));
+const workspaceSecret = process.env.SKYCLIP_WORKSPACE_SECRET || '';
 const buildAnalysisState = (project, stage = 'queued') => ({ provider: analysisProvider, mode: analysisProvider === 'local' ? 'fallback' : 'external', stage, sourceType: project.sourceType || (project.source === 'local-video' ? 'upload' : 'url'), transcriptReady: stage === 'ready', highlightsReady: stage === 'ready' });
 const isYoutubeUrl = value => /(?:youtube\.com|youtu\.be)/i.test(String(value || ''));
 const isHttpUrl = value => { try { const url = new URL(String(value || '')); return ['http:', 'https:'].includes(url.protocol); } catch { return false; } };
@@ -68,7 +70,8 @@ const json = (res, status, body) => {
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'access-control-allow-origin': '*' });
   res.end(JSON.stringify(body));
 };
-const workspaceIdFromRequest = req => req.headers['x-workspace-id'] || String(req.headers.cookie || '').match(/(?:^|;\s*)skyclip_workspace=([^;]+)/)?.[1] || 'demo-workspace';
+const signWorkspace = workspaceId => createHmac('sha256', workspaceSecret).update(workspaceId).digest('hex');
+const workspaceIdFromRequest = req => { const cookieValue = String(req.headers.cookie || '').match(/(?:^|;\s*)skyclip_workspace=([^;]+)/)?.[1] || ''; if (workspaceSecret && cookieValue) { const [workspaceId, signature] = decodeURIComponent(cookieValue).split('.'); if (workspaceId && signature && /^[a-f0-9]{64}$/.test(signature)) { const expected = signWorkspace(workspaceId); if (timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) return workspaceId; } return 'unauthenticated-workspace'; } return req.headers['x-workspace-id'] || cookieValue || 'demo-workspace'; };
 const visibleProject = (req, id) => { const project = projects.get(id); return project && project.workspaceId === workspaceIdFromRequest(req) ? project : null; };
 const workspaceBalance = workspaceId => { if (!creditBalances.has(workspaceId)) creditBalances.set(workspaceId, creditBalance); return creditBalances.get(workspaceId); };
 
@@ -82,7 +85,7 @@ const server = createServer(async (req, res) => {
     }
   }
   if (req.method === 'GET' && url.pathname === '/api/health') return json(res, 200, { ok: true, service: 'skyclip' });
-  if (req.method === 'GET' && url.pathname === '/api/capabilities') return json(res, 200, { analysisProvider, sttConfigured: Boolean(sttUrl), sttAuthenticated: Boolean(sttToken), sttTimeoutMs, youtube: true, ffmpeg: true, persistentStorage: true, storageMode: process.env.SKYCLIP_UPLOAD_DIR || process.env.SKYCLIP_RENDER_DIR ? 'configured-directory' : 'local-directory', authMode: 'workspace' });
+  if (req.method === 'GET' && url.pathname === '/api/capabilities') return json(res, 200, { analysisProvider, sttConfigured: Boolean(sttUrl), sttAuthenticated: Boolean(sttToken), sttTimeoutMs, youtube: true, ffmpeg: true, persistentStorage: true, storageMode: process.env.SKYCLIP_UPLOAD_DIR || process.env.SKYCLIP_RENDER_DIR ? 'configured-directory' : 'local-directory', authMode: workspaceSecret ? 'signed-workspace' : 'workspace', workspaceAuthConfigured: Boolean(workspaceSecret) });
   if (req.method === 'GET' && url.pathname === '/api/session') return json(res, 200, { authenticated: false, authMode: 'workspace', workspaceId: workspaceIdFromRequest(req), message: '외부 인증 제공자 연결 전 작업공간 모드로 동작합니다.' });
   if (req.method === 'GET' && url.pathname === '/api/projects') return json(res, 200, { projects: [...projects.values()].filter(project => project.workspaceId === workspaceIdFromRequest(req)) });
   if (req.method === 'GET' && url.pathname === '/api/credits') { const workspaceId = workspaceIdFromRequest(req); return json(res, 200, { balance: workspaceBalance(workspaceId), usage: [...projects.values()].filter(project => project.workspaceId === workspaceId && project.creditCost).map(project => ({ projectId: project.id, title: project.title, cost: project.creditCost, createdAt: project.updatedAt || project.createdAt })) }); }

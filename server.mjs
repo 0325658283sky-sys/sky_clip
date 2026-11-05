@@ -88,6 +88,13 @@ const server = createServer(async (req, res) => {
   if (req.method === 'GET' && url.pathname === '/api/capabilities') return json(res, 200, { analysisProvider, sttConfigured: Boolean(sttUrl), sttAuthenticated: Boolean(sttToken), sttTimeoutMs, youtube: true, ffmpeg: true, persistentStorage: true, storageMode: process.env.SKYCLIP_UPLOAD_DIR || process.env.SKYCLIP_RENDER_DIR ? 'configured-directory' : 'local-directory', authMode: workspaceSecret ? 'signed-workspace' : 'workspace', workspaceAuthConfigured: Boolean(workspaceSecret) });
   if (req.method === 'GET' && url.pathname === '/api/session') { const workspaceId = workspaceIdFromRequest(req); const signed = workspaceSecret && workspaceId !== 'unauthenticated-workspace'; return json(res, 200, { authenticated: Boolean(signed), authMode: workspaceSecret ? 'signed-workspace' : 'workspace', workspaceId, message: signed ? '서명된 작업공간 세션으로 동작합니다.' : '외부 인증 제공자 연결 전 작업공간 모드로 동작합니다.' }); }
   if (req.method === 'GET' && url.pathname === '/api/projects') return json(res, 200, { projects: [...projects.values()].filter(project => project.workspaceId === workspaceIdFromRequest(req)) });
+  if (req.method === 'POST' && url.pathname === '/api/projects/sample') {
+    const workspaceId = workspaceIdFromRequest(req);
+    const project = { id: randomUUID(), workspaceId, requestId: null, title: '시티 나이트 — 크리에이터 샘플', source: 'sample-video', sourceType: 'sample', creditCost: 0, status: 'ready', progress: 100, duration: 283, captions: ['오늘의 핵심 장면을 짧고 선명하게 전달합니다.', '시청자가 멈춰 볼 만한 순간을 골랐습니다.', '다음 장면으로 이어지는 메시지입니다.'], captionCues: [{ start: 0, end: 18 }, { start: 44, end: 76 }, { start: 112, end: 145 }], analysis: buildAnalysisState({ source: 'sample-video', sourceType: 'sample' }, 'ready'), logs: [{ message: '샘플 프로젝트를 워크스페이스에 복제했습니다.', at: new Date().toISOString() }], createdAt: new Date().toISOString() };
+    const ready = completeAnalysis(project);
+    projects.set(ready.id, ready); persist();
+    return json(res, 201, ready);
+  }
   if (req.method === 'GET' && url.pathname === '/api/credits') { const workspaceId = workspaceIdFromRequest(req); return json(res, 200, { balance: workspaceBalance(workspaceId), usage: [...projects.values()].filter(project => project.workspaceId === workspaceId && project.creditCost).map(project => ({ projectId: project.id, title: project.title, cost: project.creditCost, createdAt: project.updatedAt || project.createdAt })) }); }
   if (req.method === 'POST' && url.pathname === '/api/projects') {
     let raw = ''; for await (const chunk of req) raw += chunk;

@@ -39,6 +39,7 @@ try {
   const isolatedHeaders = { 'x-workspace-id': 'isolated-workspace' };
   const session = await (await fetch(`${base}/api/session`, { headers: workspaceHeaders })).json();
   const projects = await (await fetch(`${base}/api/projects`)).json();
+  const sample = await (await fetch(`${base}/api/projects/sample`, { method: 'POST', headers: workspaceHeaders })).json();
   const isolatedProjects = await (await fetch(`${base}/api/projects`, { headers: { 'x-workspace-id': 'isolated-workspace' } })).json();
   const credits = await (await fetch(`${base}/api/credits`)).json();
   const invalidSource = await fetch(`${base}/api/projects`, { method: 'POST', headers: { 'content-type': 'application/json', ...workspaceHeaders }, body: JSON.stringify({ title: '잘못된 링크 검증', source: 'not-a-url', creditCost: 9, requestId: `invalid-${Date.now()}` }) });
@@ -79,6 +80,7 @@ try {
     ['capabilities', capabilities.analysisProvider === 'local' && capabilities.youtube === true && capabilities.ffmpeg === true && capabilities.storageMode === 'local-directory' && capabilities.authMode === 'workspace'],
     ['session', session.authenticated === false && session.authMode === 'workspace' && session.workspaceId === 'verify-workspace'],
     ['projects', Array.isArray(projects.projects)],
+    ['sample-project-clone', sample.status === 'ready' && sample.sourceType === 'sample' && sample.resultSet?.clips?.length === 6],
     ['workspace-scope', Array.isArray(isolatedProjects.projects) && isolatedProjects.projects.length === 0],
     ['credits', Number.isFinite(credits.balance) && charged.id && chargedCredits.balance === credits.balance - 7 - 11 && isolatedCredits.balance === credits.balance],
     ['source-validation', invalidSource.status === 400 && creditsAfterInvalid.balance === credits.balance],

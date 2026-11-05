@@ -9,6 +9,7 @@
 | 자막·컷·템플릿·에셋·오디오 | `verify.mjs`, `verify-api.mjs` |
 | 9:16/1:1/16:9 렌더링 | `server.mjs`, `app.js`, export-range 검사 |
 | 공유·프로젝트 관리·재시도 | `app.js`, 프로젝트 API 검사 |
+| 샘플 결과를 내 프로젝트로 복제 | `/api/projects/sample`, 샘플 버튼 흐름 |
 | 외부 STT 선택 연결 | `verify-stt.mjs`, `.env.example` |
 | 서명 워크스페이스 경계 | `verify-auth.mjs`, `SKYCLIP_WORKSPACE_SECRET` |
 | 저장소 경로 분리 | `verify-storage.mjs`, `SKYCLIP_UPLOAD_DIR`, `SKYCLIP_RENDER_DIR` |

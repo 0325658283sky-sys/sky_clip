@@ -26,6 +26,12 @@ node server.mjs
 
 또는 `npm start`를 실행하면 같은 API 서버가 시작됩니다.
 
+서버가 이미 실행 중인지 확인하면서 안정적으로 시작하려면 다음 명령을 사용합니다.
+
+```powershell
+npm run start:stable
+```
+
 브라우저 QA는 `start.cmd` 실행 후 같은 PC의 브라우저에서 `http://localhost:8791`을 열어 진행합니다.
 
 PowerShell 위치와 관계없이 실행하려면 다음 명령을 사용합니다.
@@ -40,6 +46,12 @@ PowerShell 위치와 관계없이 실행하려면 다음 명령을 사용합니�
 
 ```powershell
 npm run verify
+```
+
+전체 API 통합검사까지 실행하려면 다음 명령을 사용합니다.
+
+```powershell
+npm run verify:api
 ```
 
 자막 편집, 컷 저장, 프로젝트/자막/내보내기 API, FFmpeg 렌더러를 자동 점검합니다.

@@ -54,6 +54,12 @@ npm run verify
 npm run verify:api
 ```
 
+전체 게이트(기본 QA + API + 외부 STT + 서명 인증)를 한 번에 실행하려면:
+
+```powershell
+npm run qa:full
+```
+
 외부 STT를 연결할 때는 `.env.example`의 계약을 기준으로 `SKYCLIP_STT_URL`을 설정합니다. 설정하지 않으면 현재 로컬 분석 폴백으로 안전하게 동작합니다.
 
 운영 환경에서는 `SKYCLIP_WORKSPACE_SECRET`을 설정하면 워크스페이스 쿠키를 서명 검증하는 모드로 전환됩니다. 이는 외부 로그인 제공자를 대체하지 않으며, 개발용 workspace 모드와 분리된 추가 경계입니다.

@@ -7,6 +7,7 @@ import { spawn } from 'node:child_process';
 import { createReadStream } from 'node:fs';
 import { createWriteStream } from 'node:fs';
 import { pipeline } from 'node:stream/promises';
+import { Transform } from 'node:stream';
 
 const projects = new Map();
 const creditRequests = new Map();
@@ -116,14 +117,16 @@ const server = createServer(async (req, res) => {
     if (Number(req.headers['content-length']) > maxUploadBytes) return json(res, 413, { error: '업로드 가능한 영상은 최대 4GB입니다.' });
     const extension = (req.headers['x-file-name'] || '').toLowerCase().match(/\.(mp4|mov|webm)$/)?.[1] || 'mp4';
     const output = join(root, 'uploads', `${project.id}.${extension}`);
+    let receivedBytes = 0;
+    const limiter = new Transform({ transform(chunk, encoding, callback) { receivedBytes += chunk.length; if (receivedBytes > maxUploadBytes) return callback(new Error('UPLOAD_TOO_LARGE')); callback(null, chunk); } });
     try {
-      await pipeline(req, createWriteStream(output));
+      await pipeline(req, limiter, createWriteStream(output));
       const metadata = await probeMedia(output);
       const updated = await completeAnalysisWithProvider({ ...project, ...metadata, source: 'local-video', renderInput: output, sourceFile: req.headers['x-file-name'] || `${project.id}.${extension}`, sourceType: 'upload', progress: 100, updatedAt: new Date().toISOString() });
       projects.set(project.id, updated); persist(); logProject(project.id, '영상 파일 업로드가 완료되었습니다.');
       return json(res, 201, { ok: true, project: updated });
     } catch (error) {
-      return json(res, 400, { error: `영상 업로드에 실패했습니다: ${error?.message || error}` });
+      return json(res, error?.message === 'UPLOAD_TOO_LARGE' ? 413 : 400, { error: error?.message === 'UPLOAD_TOO_LARGE' ? '업로드 가능한 영상은 최대 4GB입니다.' : `영상 업로드에 실패했습니다: ${error?.message || error}` });
     }
   }
   const sourcePreviewJob = url.pathname.match(/^\/api\/projects\/([^/]+)\/source$/);

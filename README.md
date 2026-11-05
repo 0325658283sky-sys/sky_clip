@@ -75,4 +75,5 @@ npm run qa:full
 5. 결제/크레딧 정책과 운영 모니터링 추가
 
 운영 전환 잔여 항목은 `PRODUCTION_GAPS.md`에 정리되어 있습니다.
+완료 근거와 외부 인프라 잔여 범위는 `COMPLETION_AUDIT.md`에서 추적합니다.
 

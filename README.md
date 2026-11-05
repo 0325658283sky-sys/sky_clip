@@ -54,6 +54,8 @@ npm run verify
 npm run verify:api
 ```
 
+외부 STT를 연결할 때는 `.env.example`의 계약을 기준으로 `SKYCLIP_STT_URL`을 설정합니다. 설정하지 않으면 현재 로컬 분석 폴백으로 안전하게 동작합니다.
+
 자막 편집, 컷 저장, 프로젝트/자막/내보내기 API, FFmpeg 렌더러를 자동 점검합니다.
 
 ## 다음 구현 순서

@@ -1,6 +1,6 @@
 import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
-import { readFile, writeFile, mkdir, rename, stat } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, rename, stat, unlink } from 'node:fs/promises';
 import { extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
@@ -126,6 +126,7 @@ const server = createServer(async (req, res) => {
       projects.set(project.id, updated); persist(); logProject(project.id, '영상 파일 업로드가 완료되었습니다.');
       return json(res, 201, { ok: true, project: updated });
     } catch (error) {
+      await unlink(output).catch(() => {});
       return json(res, error?.message === 'UPLOAD_TOO_LARGE' ? 413 : 400, { error: error?.message === 'UPLOAD_TOO_LARGE' ? '업로드 가능한 영상은 최대 4GB입니다.' : `영상 업로드에 실패했습니다: ${error?.message || error}` });
     }
   }

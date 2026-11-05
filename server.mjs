@@ -44,18 +44,25 @@ const buildResultClips = (project) => {
 };
 const extractResultClips = async project => {
   if (!project.renderInput) return project;
-  const clips = buildResultClips(project);
+  const allClips = buildResultClips(project);
+  const clips = allClips.filter(clip => !Number.isFinite(Number(project.duration)) || clip.start < Number(project.duration));
+  const escapeDrawtext = value => String(value || '').replace(/\\/g, '\\\\').replace(/:/g, '\\:').replace(/'/g, "\\'").replace(/%/g, '\\%').replace(/[\r\n]+/g, ' ');
   const extracted = [];
   for (const clip of clips.slice(0, 6)) {
     const output = join(renderDir, `${project.id}-${clip.id}.mp4`);
     const duration = Math.max(0.5, clip.end - clip.start);
     await new Promise(resolve => {
-      const child = spawn(process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg', ['-y', '-ss', String(clip.start), '-i', project.renderInput, '-t', String(duration), '-vf', 'scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-c:a', 'aac', '-movflags', '+faststart', output], { stdio: ['ignore', 'ignore', 'ignore'] });
-      child.on('close', code => { if (code === 0) extracted.push({ ...clip, previewUrl: `/api/projects/${project.id}/results/${clip.id}` }); resolve(); });
+      const hook = escapeDrawtext(clip.title);
+      const caption = escapeDrawtext(clip.subtitleText);
+      const filter = `scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,drawtext=fontfile='C\\:/Windows/Fonts/malgun.ttf':text='${hook}':fontcolor=white:fontsize=54:borderw=4:bordercolor=black@0.75:x=(w-text_w)/2:y=150,drawtext=fontfile='C\\:/Windows/Fonts/malgun.ttf':text='${caption}':fontcolor=white:fontsize=42:borderw=3:bordercolor=black@0.75:x=(w-text_w)/2:y=h-300`;
+      const child = spawn(process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg', ['-y', '-ss', String(clip.start), '-i', project.renderInput, '-t', String(duration), '-vf', filter, '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-c:a', 'aac', '-movflags', '+faststart', output], { stdio: ['ignore', 'ignore', 'ignore'] });
+      child.on('close', async code => { if (code === 0) { try { const info = await stat(output); if (info.size > 1000) extracted.push({ ...clip, previewUrl: `/api/projects/${project.id}/results/${clip.id}` }); } catch {} } resolve(); });
       child.on('error', () => resolve());
     });
   }
-  return extracted.length ? { ...project, resultSet: { ...(project.resultSet || {}), clips: extracted } } : project;
+  if (!extracted.length) return project;
+  const extractedById = new Map(extracted.map(clip => [clip.id, clip.previewUrl]));
+  return { ...project, resultSet: { ...(project.resultSet || {}), clips: allClips.map(clip => extractedById.has(clip.id) ? { ...clip, previewUrl: extractedById.get(clip.id) } : clip) } };
 };
 const sttUrl = process.env.SKYCLIP_STT_URL || '';
 const analysisProvider = process.env.SKYCLIP_ANALYSIS_PROVIDER || (sttUrl ? 'external-stt' : 'local');

@@ -50,6 +50,7 @@ const extractResultClips = async project => {
   if (!project.renderInput) return project;
   const allClips = project.resultSet?.clips?.length ? project.resultSet.clips : buildResultClips(project);
   const clips = allClips.filter(clip => !Number.isFinite(Number(project.duration)) || clip.start < Number(project.duration));
+  await Promise.all(allClips.map(clip => unlink(join(renderDir, `${project.id}-${clip.id}.mp4`)).catch(() => {})));
   const extracted = [];
   for (const clip of clips.slice(0, 6)) {
     const output = join(renderDir, `${project.id}-${clip.id}.mp4`);
@@ -204,7 +205,7 @@ const server = createServer(async (req, res) => {
     const clip = project?.resultSet?.clips?.find(item => item.id === resultClipJob[2]);
     const output = clip ? join(renderDir, `${project.id}-${clip.id}.mp4`) : null;
     if (!project || !clip || !output) return json(res, 404, { error: '결과 클립을 찾을 수 없습니다.' });
-    try { const info = await stat(output); res.writeHead(200, { 'content-type': 'video/mp4', 'content-length': info.size, 'accept-ranges': 'bytes' }); return createReadStream(output).pipe(res); } catch { return json(res, 404, { error: '결과 클립 파일이 아직 준비되지 않았습니다.' }); }
+    try { const info = await stat(output); const range = String(req.headers.range || ''); const match = range.match(/bytes=(\d*)-(\d*)/); if (!match) { res.writeHead(200, { 'content-type': 'video/mp4', 'content-length': info.size, 'accept-ranges': 'bytes' }); return createReadStream(output).pipe(res); } const start = match[1] ? Number(match[1]) : 0; const end = match[2] ? Math.min(info.size - 1, Number(match[2])) : Math.min(info.size - 1, start + 1024 * 1024 - 1); if (!Number.isFinite(start) || !Number.isFinite(end) || start > end || start >= info.size) { res.writeHead(416, { 'content-range': `bytes */${info.size}` }); return res.end(); } res.writeHead(206, { 'content-type': 'video/mp4', 'content-length': end - start + 1, 'content-range': `bytes ${start}-${end}/${info.size}`, 'accept-ranges': 'bytes' }); return createReadStream(output, { start, end }).pipe(res); } catch { return json(res, 404, { error: '결과 클립 파일이 아직 준비되지 않았습니다.' }); }
   }
   if (req.method === 'GET' && resultsJob) {
     const project = visibleProject(req, resultsJob[1]);

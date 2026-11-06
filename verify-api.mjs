@@ -64,6 +64,7 @@ try {
   const results = await (await fetch(`${base}/api/projects/${created.id}/results`, { headers: workspaceHeaders })).json();
   const previewClip = results.resultSet?.clips?.find(clip => clip.previewUrl);
   const clipPreview = previewClip ? await fetch(`${base}${previewClip.previewUrl}`, { headers: workspaceHeaders }) : null;
+  const clipRange = previewClip ? await fetch(`${base}${previewClip.previewUrl}`, { headers: { ...workspaceHeaders, range: 'bytes=0-15' } }) : null;
   const analysis = await (await fetch(`${base}/api/projects/${created.id}/analysis`, { headers: workspaceHeaders })).json();
   const exportRequest = await (await fetch(`${base}/api/projects/${created.id}/export`, { method: 'POST', headers: { 'content-type': 'application/json', ...workspaceHeaders }, body: JSON.stringify({ clipStart: 12, clipEnd: 42, format: '1:1' }) })).json();
   const exportedProject = await (await fetch(`${base}/api/projects/${created.id}`, { headers: workspaceHeaders })).json();
@@ -87,7 +88,7 @@ try {
     ['credits', Number.isFinite(credits.balance) && charged.id && chargedCredits.balance === credits.balance - 7 - 11 && isolatedCredits.balance === credits.balance],
     ['source-validation', invalidSource.status === 400 && creditsAfterInvalid.balance === credits.balance],
     ['request-idempotency', duplicate.id && duplicateRetry.id === duplicate.id],
-    ['result-clips', Array.isArray(results.resultSet?.clips) && results.resultSet.clips.length === 6 && Boolean(previewClip) && clipPreview?.status === 200 && clipPreview.headers.get('content-type')?.includes('video/mp4') && Number(clipPreview.headers.get('content-length') || 0) > 1000],
+    ['result-clips', Array.isArray(results.resultSet?.clips) && results.resultSet.clips.length === 6 && Boolean(previewClip) && clipPreview?.status === 200 && clipPreview.headers.get('content-type')?.includes('video/mp4') && Number(clipPreview.headers.get('content-length') || 0) > 1000 && clipRange?.status === 206 && clipRange.headers.get('content-range')?.startsWith('bytes 0-15/')],
     ['analysis-state', analysis.analysis?.provider === 'local' && analysis.analysis?.stage === 'ready' && analysis.analysis.transcriptReady === true && typeof analysis.analysis.method === 'string'],
     ['source-upload', upload.ok === true && upload.project?.sourceType === 'upload' && upload.project?.status === 'ready' && Boolean(upload.project?.renderInput) && Number.isFinite(upload.project?.duration)],
     ['source-preview', sourcePreview.ok && sourcePreview.headers.get('content-type')?.includes('video/mp4')],

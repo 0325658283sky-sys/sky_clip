@@ -39,8 +39,11 @@ const buildResultClips = (project) => {
   const titles = [`${sourceLabel}의 핵심 장면`, '가장 중요한 반전이 나오는 순간', '짧고 강한 한 문장', '공감을 만드는 설명', '비교로 이해하는 핵심 내용', '마무리 메시지'];
   const reasons = ['강렬한 시작과 명확한 문제 의식이 있어 짧은 영상에서도 메시지가 빠르게 전달됩니다.', '대상과 반전이 분명해 초반 이탈을 줄일 수 있는 클립입니다.', '짧고 독립적인 문장으로 구성돼 빠른 소비에 적합합니다.', '공감과 궁금증을 동시에 만드는 설명형 클립입니다.', '비교 구조가 명확해 정보 전달형 숏폼으로 적합합니다.', '감정적 긴장감이 높아 후킹 제목과 함께 사용하기 좋습니다.'];
   const total = Math.max(6, Number(project.duration) || 283);
+  const detected = [...new Set((project.scenePoints || []).filter(point => Number.isFinite(Number(point))).map(Number).filter(point => point > 0 && point < total))].sort((a, b) => a - b);
+  const boundaries = detected.length >= 2 ? [0, ...detected, total] : Array.from({ length: 7 }, (_, index) => Math.round(index * total / 6));
+  const ranges = Array.from({ length: 6 }, (_, index) => { const start = boundaries[Math.min(index, boundaries.length - 2)]; const end = boundaries[Math.min(index + 1, boundaries.length - 1)]; return { start: Math.round(start), end: Math.max(Math.round(start + 1), Math.round(end)) }; });
   const formatDuration = seconds => `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(Math.max(0, Math.round(seconds % 60))).padStart(2, '0')}`;
-  return titles.map((title, index) => { const start = Math.round(index * total / 6); const end = Math.max(start + 1, Math.round((index + 1) * total / 6)); const cueText = (project.captionCues || []).map((cue, cueIndex) => cue.end > start && cue.start < end ? project.captions?.[cueIndex] : '').filter(Boolean).join(' '); return { id: `${project.id}-clip-0${index + 1}`, title, duration: formatDuration(end - start), viralScore: 99 - index, scoreReason: reasons[index], subtitleText: cueText || project.captions?.[index] || '핵심 메시지가 시작부터 선명하게 전달되는 추천 클립입니다.', start, end }; });
+  return titles.map((title, index) => { const { start, end } = ranges[index]; const cueText = (project.captionCues || []).map((cue, cueIndex) => cue.end > start && cue.start < end ? project.captions?.[cueIndex] : '').filter(Boolean).join(' '); const sceneEvidence = detected.length ? '장면 변화와 자막 타이밍을 함께 반영한 클립입니다.' : ''; return { id: `${project.id}-clip-0${index + 1}`, title, duration: formatDuration(end - start), viralScore: 99 - index, scoreReason: `${reasons[index]} ${sceneEvidence}`, subtitleText: cueText || project.captions?.[index] || '핵심 메시지가 시작부터 선명하게 전달되는 추천 클립입니다.', start, end }; });
 };
 const extractResultClips = async project => {
   if (!project.renderInput) return project;

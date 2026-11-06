@@ -88,7 +88,7 @@ try {
     ['source-validation', invalidSource.status === 400 && creditsAfterInvalid.balance === credits.balance],
     ['request-idempotency', duplicate.id && duplicateRetry.id === duplicate.id],
     ['result-clips', Array.isArray(results.resultSet?.clips) && results.resultSet.clips.length === 6 && Boolean(previewClip) && clipPreview?.status === 200 && clipPreview.headers.get('content-type')?.includes('video/mp4') && Number(clipPreview.headers.get('content-length') || 0) > 1000],
-    ['analysis-state', analysis.analysis?.provider === 'local' && analysis.analysis?.stage === 'ready' && analysis.analysis.transcriptReady === true],
+    ['analysis-state', analysis.analysis?.provider === 'local' && analysis.analysis?.stage === 'ready' && analysis.analysis.transcriptReady === true && typeof analysis.analysis.method === 'string'],
     ['source-upload', upload.ok === true && upload.project?.sourceType === 'upload' && upload.project?.status === 'ready' && Boolean(upload.project?.renderInput) && Number.isFinite(upload.project?.duration)],
     ['source-preview', sourcePreview.ok && sourcePreview.headers.get('content-type')?.includes('video/mp4')],
     ['source-range', sourceRange.status === 206 && sourceRange.headers.get('content-range')?.startsWith('bytes 0-15/')],

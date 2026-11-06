@@ -45,19 +45,19 @@ const buildResultClips = (project) => {
   const formatDuration = seconds => `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(Math.max(0, Math.round(seconds % 60))).padStart(2, '0')}`;
   return titles.map((title, index) => { const { start, end } = ranges[index]; const cueText = (project.captionCues || []).map((cue, cueIndex) => cue.end > start && cue.start < end ? project.captions?.[cueIndex] : '').filter(Boolean).join(' '); const subtitleText = cueText || project.captions?.[index] || '핵심 메시지가 시작부터 선명하게 전달되는 추천 클립입니다.'; const generatedTitle = cueText ? cueText.replace(/[^\p{L}\p{N}\s?!.,]/gu, '').trim().slice(0, 32) : title; const score = Math.min(99, 68 + Math.min(15, Math.round(subtitleText.length / 80 * 15)) + (detected.length ? 10 : 0) + Math.max(0, 6 - index)); const sceneEvidence = detected.length ? '장면 변화와 자막 타이밍을 함께 반영했습니다.' : '자막 구간과 영상 길이를 기준으로 분석했습니다.'; return { id: `${project.id}-clip-0${index + 1}`, title: generatedTitle || title, duration: formatDuration(end - start), viralScore: score, scoreReason: `${reasons[index]} ${sceneEvidence}`, subtitleText, start, end }; });
 };
+const escapeFfmpegText = value => String(value || '').replace(/\\/g, '\\\\').replace(/:/g, '\\:').replace(/'/g, "\\'").replace(/%/g, '\\%').replace(/[\r\n]+/g, ' ');
 const extractResultClips = async project => {
   if (!project.renderInput) return project;
   const allClips = buildResultClips(project);
   const clips = allClips.filter(clip => !Number.isFinite(Number(project.duration)) || clip.start < Number(project.duration));
-  const escapeDrawtext = value => String(value || '').replace(/\\/g, '\\\\').replace(/:/g, '\\:').replace(/'/g, "\\'").replace(/%/g, '\\%').replace(/[\r\n]+/g, ' ');
   const extracted = [];
   for (const clip of clips.slice(0, 6)) {
     const output = join(renderDir, `${project.id}-${clip.id}.mp4`);
     const duration = Math.max(0.5, clip.end - clip.start);
     await new Promise(resolve => {
-      const hook = escapeDrawtext(clip.title);
+      const hook = escapeFfmpegText(clip.title);
       const captionLines = String(clip.subtitleText || '').match(/.{1,24}(?:\\s+|$)/g)?.map(line => line.trim()).slice(0, 3).join('\\n') || clip.subtitleText;
-      const caption = escapeDrawtext(captionLines);
+      const caption = escapeFfmpegText(captionLines);
       const filter = `scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,drawtext=fontfile='C\\:/Windows/Fonts/malgun.ttf':text='${hook}':fontcolor=white:fontsize=54:borderw=4:bordercolor=black@0.75:box=1:boxcolor=black@0.28:boxborderw=18:x=(w-text_w)/2:y=150,drawtext=fontfile='C\\:/Windows/Fonts/malgun.ttf':text='${caption}':fontcolor=white:fontsize=42:borderw=3:bordercolor=black@0.75:box=1:boxcolor=black@0.68:boxborderw=24:x=(w-text_w)/2:y=h-340`;
       const child = spawn(process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg', ['-y', '-ss', String(clip.start), '-i', project.renderInput, '-t', String(duration), '-vf', filter, '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-c:a', 'aac', '-movflags', '+faststart', output], { stdio: ['ignore', 'ignore', 'ignore'] });
       child.on('close', async code => { if (code === 0) { try { const info = await stat(output); if (info.size > 1000) extracted.push({ ...clip, previewUrl: `/api/projects/${project.id}/results/${clip.id}` }); } catch {} } resolve(); });
@@ -286,7 +286,10 @@ const server = createServer(async (req, res) => {
       const visualAssetPath = visualAssetRecord?.filePath || null;
       const inputArgs = ['-i', project.renderInput];
       const [width, height] = exportFormats[format];
-      let filterArgs = ['-vf', `scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height}`];
+      const exportHook = escapeFfmpegText(project.editorState?.hookTitle || project.selectedClip?.title || '');
+      const exportCaption = escapeFfmpegText(project.selectedClip?.subtitle || project.captions?.[0] || '');
+      const textOverlay = exportHook || exportCaption ? `,drawtext=fontfile='C\\:/Windows/Fonts/malgun.ttf':text='${exportHook}':fontcolor=white:fontsize=54:borderw=4:bordercolor=black@0.75:box=1:boxcolor=black@0.28:boxborderw=18:x=(w-text_w)/2:y=150,drawtext=fontfile='C\\:/Windows/Fonts/malgun.ttf':text='${exportCaption}':fontcolor=white:fontsize=42:borderw=3:bordercolor=black@0.75:box=1:boxcolor=black@0.68:boxborderw=24:x=(w-text_w)/2:y=h-340` : '';
+      let filterArgs = ['-vf', `scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height}${textOverlay}`];
       let videoMapArgs = [];
       let audioMapArgs = ['-c:a', 'aac'];
       if (visualAssetPath) { inputArgs.push(...(visualAsset.type?.includes('이미지') ? ['-loop', '1', '-i', visualAssetPath] : ['-stream_loop', '-1', '-i', visualAssetPath])); const assetWidth = Math.round(width * 0.833); filterArgs = ['-filter_complex', `[0:v]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height}[base];[1:v]scale=${assetWidth}:-2[asset];[base][asset]overlay=(W-w)/2:(H-h)/2:enable=\'between(t,0,99999)\'[v]`]; videoMapArgs = ['-map', '[v]']; }

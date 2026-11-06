@@ -14,6 +14,7 @@
 - `.env.example`의 `SKYCLIP_STT_URL`과 `SKYCLIP_STT_TOKEN` 설정
 - 게이트웨이는 `file` multipart 필드와 `captions`, `captionCues` 응답 계약을 준수해야 한다.
 - 연결 실패 시 로컬 분석 폴백과 로그 기록이 동작한다.
+- 하이라이트 모델은 `SKYCLIP_HIGHLIGHT_URL`에 JSON 계약(`clips[]`의 `start`, `end`, `title`, `viralScore`, `scoreReason`, `subtitleText`)을 제공하면 연결된다.
 
 ## 3. 영구 저장소
 

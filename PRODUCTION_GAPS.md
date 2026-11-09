@@ -15,6 +15,7 @@
 - 게이트웨이는 `file` multipart 필드와 `captions`, `captionCues` 응답 계약을 준수해야 한다.
 - 연결 실패 시 로컬 분석 폴백과 로그 기록이 동작한다.
 - 하이라이트 모델은 `SKYCLIP_HIGHLIGHT_URL`에 JSON 계약(`clips[]`의 `start`, `end`, `title`, `viralScore`, `scoreReason`, `subtitleText`)을 제공하면 연결된다.
+- 선택적으로 `focusX`, `focusY`(0~1)를 반환하면 이후 얼굴 중심 자동 리프레이밍 워커에서 사용할 수 있다.
 
 ## 3. 영구 저장소
 
@@ -26,3 +27,10 @@
 - FFmpeg/yt-dlp가 포함된 워커 이미지 구성
 - HTTPS, 비밀키 관리, 로그 수집, 작업 큐와 재시도 정책 연결
 - 배포 전 `npm run qa:full` 실행
+
+## 5. 연결 순서
+
+1. STT 게이트웨이와 하이라이트 게이트웨이에 운영 URL·토큰 설정
+2. OAuth/OIDC 콜백에서 사용자 ID를 서명 워크스페이스로 매핑
+3. 업로드·렌더 디렉터리를 영구 볼륨 또는 오브젝트 스토리지 워커로 교체
+4. FFmpeg 워커와 큐를 분리한 뒤 `npm run qa:full`과 실제 MP4 회귀 테스트 실행

@@ -125,6 +125,11 @@ const server = createServer(async (req, res) => {
   }
   if (req.method === 'GET' && url.pathname === '/api/health') return json(res, 200, { ok: true, service: 'skyclip' });
   if (req.method === 'GET' && url.pathname === '/api/capabilities') return json(res, 200, { analysisProvider, sttConfigured: Boolean(sttUrl), sttAuthenticated: Boolean(sttToken), sttTimeoutMs, highlightConfigured: Boolean(highlightUrl), highlightAuthenticated: Boolean(highlightToken), highlightTimeoutMs, youtube: true, ffmpeg: true, persistentStorage: true, storageMode: process.env.SKYCLIP_UPLOAD_DIR || process.env.SKYCLIP_RENDER_DIR ? 'configured-directory' : 'local-directory', authMode: workspaceSecret ? 'signed-workspace' : 'workspace', workspaceAuthConfigured: Boolean(workspaceSecret) });
+  if (req.method === 'GET' && url.pathname === '/api/ready') {
+    const checks = { dataDirectory: Boolean(dataFile), uploadDirectory: Boolean(uploadDir), renderDirectory: Boolean(renderDir), ffmpeg: true };
+    const ready = Object.values(checks).every(Boolean);
+    return json(res, ready ? 200 : 503, { ready, checks, analysisProvider, authConfigured: Boolean(workspaceSecret), externalAnalysisConfigured: Boolean(sttUrl || highlightUrl) });
+  }
   if (req.method === 'GET' && url.pathname === '/api/session') { const workspaceId = workspaceIdFromRequest(req); const signed = workspaceSecret && workspaceId !== 'unauthenticated-workspace'; return json(res, 200, { authenticated: Boolean(signed), authMode: workspaceSecret ? 'signed-workspace' : 'workspace', workspaceId, message: signed ? '서명된 작업공간 세션으로 동작합니다.' : '외부 인증 제공자 연결 전 작업공간 모드로 동작합니다.' }); }
   if (req.method === 'GET' && url.pathname === '/api/projects') return json(res, 200, { projects: [...projects.values()].filter(project => project.workspaceId === workspaceIdFromRequest(req)) });
   if (req.method === 'POST' && url.pathname === '/api/projects/sample') {

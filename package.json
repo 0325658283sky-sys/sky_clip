@@ -17,5 +17,6 @@
     "verify:highlight": "node verify-highlight.mjs",
     "verify:auth": "node verify-auth.mjs",
     "verify:storage": "node verify-storage.mjs"
+    ,"verify:ready": "node verify-ready.mjs"
   }
 }

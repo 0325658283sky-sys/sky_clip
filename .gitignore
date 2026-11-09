@@ -2,4 +2,5 @@ node_modules/
 *.log
 renders/*
 !renders/.gitkeep
+.ready-check.json
 .DS_Store

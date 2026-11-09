@@ -27,6 +27,7 @@
 - FFmpeg/yt-dlp가 포함된 워커 이미지 구성
 - HTTPS, 비밀키 관리, 로그 수집, 작업 큐와 재시도 정책 연결
 - 배포 전 `npm run qa:full` 실행
+- `Dockerfile`과 `docker-compose.yml`에 FFmpeg/yt-dlp, 영구 `/data` 볼륨, `/api/ready` 헬스체크가 준비되어 있다.
 
 ## 5. 연결 순서
 

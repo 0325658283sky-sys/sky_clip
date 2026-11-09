@@ -8,7 +8,7 @@ import { spawn } from 'node:child_process';
 import { createReadStream } from 'node:fs';
 import { createWriteStream } from 'node:fs';
 import { pipeline } from 'node:stream/promises';
-import { Transform } from 'node:stream';
+import { Transform, Readable } from 'node:stream';
 
 const projects = new Map();
 const creditRequests = new Map();
@@ -79,6 +79,7 @@ const highlightTimeoutMs = Math.max(5000, Number(process.env.SKYCLIP_HIGHLIGHT_T
 const workspaceSecret = process.env.SKYCLIP_WORKSPACE_SECRET || '';
 const buildAnalysisState = (project, stage = 'queued') => ({ provider: analysisProvider, mode: analysisProvider === 'local' ? 'fallback' : 'external', method: project.analysisMethod || 'transcript fallback', scenePoints: project.scenePoints?.length || 0, stage, sourceType: project.sourceType || (project.source === 'local-video' ? 'upload' : 'url'), transcriptReady: stage === 'ready', highlightsReady: stage === 'ready' });
 const isYoutubeUrl = value => /(?:youtube\.com|youtu\.be)/i.test(String(value || ''));
+const isDirectMediaUrl = value => { try { return /\.(?:mp4|mov|webm)(?:$|[?#])/i.test(new URL(String(value || '')).pathname); } catch { return false; } };
 const isHttpUrl = value => { try { const url = new URL(String(value || '')); return ['http:', 'https:'].includes(url.protocol); } catch { return false; } };
 const probeMedia = file => new Promise(resolve => { const child = spawn('ffprobe', ['-v', 'error', '-show_entries', 'format=duration:stream=width,height', '-of', 'json', file], { stdio: ['ignore', 'pipe', 'ignore'] }); let raw = ''; child.stdout.on('data', chunk => { raw += String(chunk); }); child.on('close', () => { try { const parsed = JSON.parse(raw); const stream = parsed.streams?.find(item => item.width || item.height) || {}; resolve({ duration: Number(parsed.format?.duration) || null, width: Number(stream.width) || null, height: Number(stream.height) || null }); } catch { resolve({ duration: null, width: null, height: null }); } }); child.on('error', () => resolve({ duration: null, width: null, height: null })); });
 const detectScenePoints = file => new Promise(resolve => { if (!file) return resolve([]); const child = spawn(process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg', ['-hide_banner', '-i', file, '-vf', "select='gt(scene,0.28)',showinfo", '-f', 'null', '-'], { stdio: ['ignore', 'ignore', 'pipe'] }); let raw = ''; child.stderr.on('data', chunk => { raw += String(chunk); }); child.on('close', () => { const points = [...raw.matchAll(/pts_time:([0-9.]+)/g)].map(match => Number(match[1])).filter(Number.isFinite); resolve([...new Set(points.map(value => Math.round(value * 10) / 10))].slice(0, 24)); }); child.on('error', () => resolve([])); });
@@ -97,6 +98,12 @@ const startYoutubeDownload = project => {
   const child = spawn('yt-dlp', ['--no-playlist', '--merge-output-format', 'mp4', '-o', output, project.source], { stdio: ['ignore', 'ignore', 'pipe'] });
   child.stderr.on('data', chunk => { const current = projects.get(project.id); if (current) { const percent = String(chunk).match(/(\d{1,3}(?:\.\d+)?)%/); projects.set(project.id, { ...current, progress: percent ? Math.max(15, Math.min(72, Math.round(Number(percent[1]) * 0.57 + 15))) : current.progress }); persist(); } });
   child.on('close', async code => { const current = projects.get(project.id); if (!current) return; if (code !== 0) { logProject(project.id, 'YouTube 원본 다운로드에 실패했습니다.'); projects.set(project.id, { ...current, status: 'failed', progress: 0, analysis: buildAnalysisState(current, 'failed') }); persist(); return; } const metadata = await probeMedia(output); const subtitleData = await collectYoutubeCaptions(current); const ready = await completeAnalysisWithProvider({ ...current, ...metadata, ...subtitleData, renderInput: output, sourceType: 'youtube', progress: 85 }); projects.set(project.id, ready); persist(); logProject(project.id, subtitleData.captions.length ? 'YouTube 자막을 가져와 분석에 반영했습니다.' : 'YouTube 원본 다운로드와 분석이 완료되었습니다.'); });
+};
+const startDirectMediaDownload = project => {
+  const extension = String(project.source).match(/\.(mp4|mov|webm)(?:$|[?#])/i)?.[1]?.toLowerCase() || 'mp4';
+  const output = join(uploadDir, `${project.id}.${extension}`);
+  projects.set(project.id, { ...project, sourceType: 'direct-media', status: 'processing', progress: 15, analysis: buildAnalysisState(project, 'downloading') }); persist(); logProject(project.id, '직접 영상 링크 다운로드를 시작했습니다.');
+  fetch(project.source).then(async response => { if (!response.ok || !response.body) throw new Error(`direct media ${response.status}`); await pipeline(Readable.fromWeb(response.body), createWriteStream(output)); const metadata = await probeMedia(output); const ready = await completeAnalysisWithProvider({ ...projects.get(project.id), ...metadata, renderInput: output, sourceFile: `${project.id}.${extension}`, sourceType: 'direct-media', progress: 85 }); projects.set(project.id, ready); persist(); logProject(project.id, '직접 영상 링크 분석이 완료되었습니다.'); }).catch(async error => { await unlink(output).catch(() => {}); const current = projects.get(project.id); if (current) { projects.set(project.id, { ...current, status: 'failed', progress: 0, error: `직접 영상 링크를 가져오지 못했습니다: ${error?.message || error}`, analysis: buildAnalysisState(current, 'failed') }); persist(); logProject(project.id, '직접 영상 링크 다운로드에 실패했습니다.'); } });
 };
 const json = (res, status, body) => {
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'access-control-allow-origin': '*' });
@@ -146,6 +153,7 @@ const server = createServer(async (req, res) => {
     if (requestKey) creditRequests.set(requestKey, project);
     persist();
     if (isYoutubeUrl(project.source)) startYoutubeDownload(project);
+    else if (isDirectMediaUrl(project.source)) startDirectMediaDownload(project);
     else {
       setTimeout(() => { logProject(project.id, 'AI 분석을 시작했습니다.'); const current = projects.get(project.id); if (current) { projects.set(project.id, { ...current, status: 'processing', progress: 35, analysis: buildAnalysisState(current, 'transcribing') }); persist(); } }, 250);
       setTimeout(() => { logProject(project.id, '하이라이트와 자막 후보를 분석 중입니다.'); const current = projects.get(project.id); if (current) { projects.set(project.id, { ...current, status: 'processing', progress: 72, analysis: buildAnalysisState(current, 'scoring') }); persist(); } }, 600);

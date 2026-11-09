@@ -293,7 +293,9 @@ const server = createServer(async (req, res) => {
       const [width, height] = exportFormats[format];
       const exportHook = escapeFfmpegText(project.editorState?.hookTitle || project.selectedClip?.title || '');
       const exportCaption = escapeFfmpegText(project.selectedClip?.subtitle || project.captions?.[0] || '');
-      const textOverlay = exportHook || exportCaption ? `,drawtext=fontfile='C\\:/Windows/Fonts/malgun.ttf':text='${exportHook}':fontcolor=white:fontsize=54:borderw=4:bordercolor=black@0.75:box=1:boxcolor=black@0.28:boxborderw=18:x=(w-text_w)/2:y=150,drawtext=fontfile='C\\:/Windows/Fonts/malgun.ttf':text='${exportCaption}':fontcolor=white:fontsize=42:borderw=3:bordercolor=black@0.75:box=1:boxcolor=black@0.68:boxborderw=24:x=(w-text_w)/2:y=h-340` : '';
+      const captionStyle = String(project.editorState?.captionStyle || 'clean').toLowerCase();
+      const captionColor = captionStyle.includes('karaoke') ? '#ffd166' : captionStyle.includes('pop') ? '#ff8bd8' : captionStyle.includes('bounce') ? '#b9a7ff' : 'white';
+      const textOverlay = exportHook || exportCaption ? `,drawtext=fontfile='C\\:/Windows/Fonts/malgun.ttf':text='${exportHook}':fontcolor=white:fontsize=54:borderw=4:bordercolor=black@0.75:box=1:boxcolor=black@0.28:boxborderw=18:x=(w-text_w)/2:y=150,drawtext=fontfile='C\\:/Windows/Fonts/malgun.ttf':text='${exportCaption}':fontcolor=${captionColor}:fontsize=42:borderw=3:bordercolor=black@0.75:box=1:boxcolor=black@0.68:boxborderw=24:x=(w-text_w)/2:y=h-340` : '';
       let filterArgs = ['-vf', `scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height}${textOverlay}`];
       let videoMapArgs = [];
       let audioMapArgs = ['-c:a', 'aac'];

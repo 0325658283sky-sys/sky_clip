@@ -1,8 +1,8 @@
 import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { readFile, writeFile, mkdir, rename, stat, unlink } from 'node:fs/promises';
-import { extname, join } from 'node:path';
+import { readFile, writeFile, mkdir, rename, stat, unlink, access } from 'node:fs/promises';
+import { extname, join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { createReadStream } from 'node:fs';
@@ -82,6 +82,7 @@ const isYoutubeUrl = value => /(?:youtube\.com|youtu\.be)/i.test(String(value ||
 const isDirectMediaUrl = value => { try { return /\.(?:mp4|mov|webm)(?:$|[?#])/i.test(new URL(String(value || '')).pathname); } catch { return false; } };
 const isHttpUrl = value => { try { const url = new URL(String(value || '')); return ['http:', 'https:'].includes(url.protocol); } catch { return false; } };
 const probeMedia = file => new Promise(resolve => { const child = spawn('ffprobe', ['-v', 'error', '-show_entries', 'format=duration:stream=width,height', '-of', 'json', file], { stdio: ['ignore', 'pipe', 'ignore'] }); let raw = ''; child.stdout.on('data', chunk => { raw += String(chunk); }); child.on('close', () => { try { const parsed = JSON.parse(raw); const stream = parsed.streams?.find(item => item.width || item.height) || {}; resolve({ duration: Number(parsed.format?.duration) || null, width: Number(stream.width) || null, height: Number(stream.height) || null }); } catch { resolve({ duration: null, width: null, height: null }); } }); child.on('error', () => resolve({ duration: null, width: null, height: null })); });
+const commandAvailable = command => new Promise(resolve => { const child = spawn(command, ['-version'], { stdio: 'ignore' }); child.on('close', code => resolve(code === 0)); child.on('error', () => resolve(false)); });
 const detectScenePoints = file => new Promise(resolve => { if (!file) return resolve([]); const child = spawn(process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg', ['-hide_banner', '-i', file, '-vf', "select='gt(scene,0.28)',showinfo", '-f', 'null', '-'], { stdio: ['ignore', 'ignore', 'pipe'] }); let raw = ''; child.stderr.on('data', chunk => { raw += String(chunk); }); child.on('close', () => { const points = [...raw.matchAll(/pts_time:([0-9.]+)/g)].map(match => Number(match[1])).filter(Number.isFinite); resolve([...new Set(points.map(value => Math.round(value * 10) / 10))].slice(0, 24)); }); child.on('error', () => resolve([])); });
 const exportFormats = { '9:16': [1080, 1920], '1:1': [1080, 1080], '16:9': [1920, 1080] };
 const getExportFormat = value => exportFormats[value] ? value : '9:16';
@@ -126,7 +127,7 @@ const server = createServer(async (req, res) => {
   if (req.method === 'GET' && url.pathname === '/api/health') return json(res, 200, { ok: true, service: 'skyclip' });
   if (req.method === 'GET' && url.pathname === '/api/capabilities') return json(res, 200, { analysisProvider, sttConfigured: Boolean(sttUrl), sttAuthenticated: Boolean(sttToken), sttTimeoutMs, highlightConfigured: Boolean(highlightUrl), highlightAuthenticated: Boolean(highlightToken), highlightTimeoutMs, youtube: true, ffmpeg: true, persistentStorage: true, storageMode: process.env.SKYCLIP_UPLOAD_DIR || process.env.SKYCLIP_RENDER_DIR ? 'configured-directory' : 'local-directory', authMode: workspaceSecret ? 'signed-workspace' : 'workspace', workspaceAuthConfigured: Boolean(workspaceSecret) });
   if (req.method === 'GET' && url.pathname === '/api/ready') {
-    const checks = { dataDirectory: Boolean(dataFile), uploadDirectory: Boolean(uploadDir), renderDirectory: Boolean(renderDir), ffmpeg: true };
+    const checks = { dataDirectory: await access(dirname(dataFile)).then(() => true).catch(() => false), uploadDirectory: await access(uploadDir).then(() => true).catch(() => false), renderDirectory: await access(renderDir).then(() => true).catch(() => false), ffmpeg: await commandAvailable(process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg'), ffprobe: await commandAvailable(process.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe') };
     const ready = Object.values(checks).every(Boolean);
     return json(res, ready ? 200 : 503, { ready, checks, analysisProvider, authConfigured: Boolean(workspaceSecret), externalAnalysisConfigured: Boolean(sttUrl || highlightUrl) });
   }

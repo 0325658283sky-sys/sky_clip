@@ -68,7 +68,7 @@ npm run qa:full
 
 외부 하이라이트 모델은 `SKYCLIP_HIGHLIGHT_URL`을 설정합니다. 모델은 `clips[]`에 `start`, `end`, `title`, `viralScore`, `scoreReason`, `subtitleText`를 반환해야 하며, 연결 실패 시 로컬 장면·자막 분석으로 폴백합니다.
 
-운영 환경에서는 `SKYCLIP_WORKSPACE_SECRET`을 설정하면 워크스페이스 쿠키를 서명 검증하는 모드로 전환됩니다. 이는 외부 로그인 제공자를 대체하지 않으며, 개발용 workspace 모드와 분리된 추가 경계입니다.
+운영 환경에서는 `SKYCLIP_WORKSPACE_SECRET`을 설정하면 워크스페이스 쿠키를 서명 검증하는 모드로 전환됩니다. 이는 외부 로그인 제공자를 대체하지 않으며, 개발용 workspace 모드와 분리된 추가 경계입니다. 배포 모니터링은 `/api/health`(프로세스 생존)와 `/api/ready`(상태 파일·볼륨·FFmpeg·FFprobe 준비)를 구분해 사용합니다.
 
 ## 컨테이너 운영
 

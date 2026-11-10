@@ -80,7 +80,7 @@ async function prepareYouTubeProject(project, sourcePath) {
 async function handleApi(req, res, url) {
   if (url.pathname === '/api/health') { json(res, 200, { ok: true, service: 'skyclip', mode: 'local' }); return true; }
   if (req.method === 'GET' && url.pathname === '/api/projects') {
-    const entries = (await import('node:fs/promises')).readdir(dataRoot, { withFileTypes: true });
+    const entries = await (await import('node:fs/promises')).readdir(dataRoot, { withFileTypes: true });
     const projects = [];
     for (const entry of entries) if (entry.isFile() && entry.name.endsWith('.json')) { try { projects.push(JSON.parse(await readFile(join(dataRoot, entry.name), 'utf8'))); } catch {} }
     projects.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))); json(res, 200, { projects }); return true;
@@ -171,6 +171,18 @@ async function handleApi(req, res, url) {
     const captionPath = join(uploadRoot, `${project.id}.vtt`); await writeFile(captionPath, vtt, 'utf8');
     project.captions = captions; project.captionPath = captionPath; project.captionUrl = `/media/${basename(captionPath)}`;
     await writeFile(projectPath, JSON.stringify(project, null, 2)); json(res, 200, { ok: true, captions, captionUrl: project.captionUrl }); return true;
+  }
+  const sttMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/stt$/);
+  if (req.method === 'POST' && sttMatch) {
+    const projectPath = join(dataRoot, `${sttMatch[1]}.json`); const project = JSON.parse(await readFile(projectPath, 'utf8'));
+    const source = project.previewPath || project.source; if (!source) throw new Error('자막을 생성할 영상이 없습니다.');
+    const captionPath = join(uploadRoot, `${project.id}-stt.vtt`);
+    const scriptPath = join(fileURLToPath(new URL('.', import.meta.url)), 'scripts', 'stt.py');
+    const result = await execFile('python', [scriptPath, source, captionPath], { windowsHide: true, timeoutMs: 900000 });
+    const output = JSON.parse(result.stdout.trim()); if (!output.ok) throw new Error(output.error || 'STT 자막 생성에 실패했습니다.');
+    project.captions = output.captions || []; project.captionPath = captionPath; project.captionUrl = `/media/${basename(captionPath)}`;
+    project.stt = { engine: 'faster-whisper', model: output.model, language: output.language, completedAt: new Date().toISOString() };
+    await writeFile(projectPath, JSON.stringify(project, null, 2)); json(res, 200, { ok: true, captions: project.captions, captionUrl: project.captionUrl, stt: project.stt }); return true;
   }
   return false;
 }

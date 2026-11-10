@@ -59,7 +59,11 @@ const extractResultClips = async project => {
       const hook = escapeFfmpegText(clip.title);
       const captionLines = String(clip.subtitleText || '').match(/.{1,24}(?:\\s+|$)/g)?.map(line => line.trim()).slice(0, 3).join('\\n') || clip.subtitleText;
       const caption = escapeFfmpegText(captionLines);
-      const filter = `scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,drawtext=fontfile='C\\:/Windows/Fonts/malgun.ttf':text='${hook}':fontcolor=white:fontsize=54:borderw=4:bordercolor=black@0.75:box=1:boxcolor=black@0.28:boxborderw=18:x=(w-text_w)/2:y=150,drawtext=fontfile='C\\:/Windows/Fonts/malgun.ttf':text='${caption}':fontcolor=white:fontsize=42:borderw=3:bordercolor=black@0.75:box=1:boxcolor=black@0.68:boxborderw=24:x=(w-text_w)/2:y=h-340`;
+      const focusX = Number.isFinite(Number(clip.focusX)) ? Math.max(0, Math.min(1, Number(clip.focusX))) : 0.5;
+      const focusY = Number.isFinite(Number(clip.focusY)) ? Math.max(0, Math.min(1, Number(clip.focusY))) : 0.5;
+      const cropX = `max(0,min(iw-1080,(iw-1080)*${focusX.toFixed(4)}))`;
+      const cropY = `max(0,min(ih-1920,(ih-1920)*${focusY.toFixed(4)}))`;
+      const filter = `scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920:${cropX}:${cropY},drawtext=fontfile='C\\:/Windows/Fonts/malgun.ttf':text='${hook}':fontcolor=white:fontsize=54:borderw=4:bordercolor=black@0.75:box=1:boxcolor=black@0.28:boxborderw=18:x=(w-text_w)/2:y=150,drawtext=fontfile='C\\:/Windows/Fonts/malgun.ttf':text='${caption}':fontcolor=white:fontsize=42:borderw=3:bordercolor=black@0.75:box=1:boxcolor=black@0.68:boxborderw=24:x=(w-text_w)/2:y=h-340`;
       const child = spawn(process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg', ['-y', '-ss', String(clip.start), '-i', project.renderInput, '-t', String(duration), '-vf', filter, '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-c:a', 'aac', '-movflags', '+faststart', output], { stdio: ['ignore', 'ignore', 'ignore'] });
       child.on('close', async code => { if (code === 0) { try { const info = await stat(output); if (info.size > 1000) extracted.push({ ...clip, previewUrl: `/api/projects/${project.id}/results/${clip.id}` }); } catch {} } resolve(); });
       child.on('error', () => resolve());

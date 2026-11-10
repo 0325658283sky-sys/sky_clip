@@ -74,6 +74,8 @@ npm run qa:full
 
 Docker가 설치된 환경에서는 `.env`를 만든 뒤 `docker compose up -d --build`로 실행할 수 있습니다. 영상·렌더·상태 파일은 `skyclip-data` 영구 볼륨에 저장되며, 운영 모니터링은 `/api/ready`를 사용합니다. 실제 운영 전에는 `.env`의 인증·STT·하이라이트 비밀값을 반드시 설정해야 합니다.
 
+배포 직전에는 `npm run verify:config -- --production`으로 필수 운영 설정을 확인합니다. 개발 모드에서는 인증·AI 공급자 없이 로컬 폴백으로 실행되며, 운영 모드에서는 `SKYCLIP_WORKSPACE_SECRET`이 필수입니다.
+
 자막 편집, 컷 저장, 프로젝트/자막/내보내기 API, 실제 1080x1920 클립 파일, FFmpeg 렌더러를 자동 점검합니다.
 
 ## 다음 구현 순서

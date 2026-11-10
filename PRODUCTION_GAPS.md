@@ -28,6 +28,7 @@
 - HTTPS, 비밀키 관리, 로그 수집, 작업 큐와 재시도 정책 연결
 - 배포 전 `npm run qa:full` 실행
 - `Dockerfile`과 `docker-compose.yml`에 FFmpeg/yt-dlp, 영구 `/data` 볼륨, `/api/ready` 헬스체크가 준비되어 있다.
+- `npm run verify:config -- --production`으로 운영 필수 비밀값 누락을 배포 전에 차단한다.
 
 ## 5. 연결 순서
 

@@ -134,6 +134,12 @@ async function handleApi(req, res, url) {
     await writeFile(projectPath, JSON.stringify(project, null, 2)); json(res, 200, project); return true;
   }
   const exportMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/export$/);
+  const toolMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/tools\/([^/]+)$/);
+  if (req.method === 'POST' && toolMatch && toolMatch[2] === 'silence') {
+    const projectPath = join(dataRoot, `${toolMatch[1]}.json`); const project = JSON.parse(await readFile(projectPath, 'utf8')); const source = project.previewPath || project.source; const output = join(uploadRoot, `${project.id}-silence.mp4`);
+    await execFile('ffmpeg', ['-y', '-i', source, '-af', 'silenceremove=stop_periods=-1:stop_duration=0.45:stop_threshold=-35dB', '-c:v', 'copy', '-c:a', 'aac', '-movflags', '+faststart', output], { windowsHide: true, timeoutMs: 180000 });
+    project.previewPath = output; project.previewUrl = `/media/${basename(output)}`; await writeFile(projectPath, JSON.stringify(project, null, 2)); json(res, 200, { ok: true, previewUrl: project.previewUrl }); return true;
+  }
   if (req.method === 'POST' && exportMatch) {
     const projectPath = join(dataRoot, `${exportMatch[1]}.json`); const project = JSON.parse(await readFile(projectPath, 'utf8'));
     const source = project.previewPath || project.source; if (!source) throw new Error('내보낼 영상이 없습니다.');

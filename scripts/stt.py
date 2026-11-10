@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import sys
 import tempfile
 import subprocess
@@ -31,11 +32,13 @@ def main():
         segments, info = model.transcribe(str(wav_path), vad_filter=True, beam_size=1)
         captions = []
         for segment in segments:
-            text = segment.text.strip()
+            text = re.sub(r'([,.!?\-])\1{2,}', r'\1', segment.text.strip())
+            text = re.sub(r'\s+', ' ', text).strip(' ,.!?-')
             if text: captions.append({"start": float(segment.start), "end": float(segment.end), "text": text})
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text("WEBVTT\n\n" + "\n".join(f"{i}\n{vtt_time(x['start'])} --> {vtt_time(x['end'])}\n{x['text']}\n" for i, x in enumerate(captions, 1)), encoding="utf-8")
-        print(json.dumps({"ok": True, "captions": captions, "language": getattr(info, "language", None), "model": model_name}, ensure_ascii=False)); return 0
+        # Windows 콘솔 코드페이지와 무관하게 Node가 UTF-8 JSON을 안전하게 복원하도록 escape한다.
+        print(json.dumps({"ok": True, "captions": captions, "language": getattr(info, "language", None), "model": model_name}, ensure_ascii=True)); return 0
     except subprocess.CalledProcessError as exc:
         detail = exc.stderr.decode("utf-8", errors="replace")[-1000:]
         print(json.dumps({"ok": False, "error": f"오디오 변환 실패: {detail}"}, ensure_ascii=False)); return 5

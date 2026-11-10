@@ -55,15 +55,27 @@ async function extractPreview(sourcePath, projectId) {
   } catch { return null; }
 }
 
+async function makeReadyClip(clipPath, projectId, index, duration) {
+  const vttPath = join(uploadRoot, `${projectId}-clip-${index}.vtt`); const readyPath = join(uploadRoot, `${projectId}-ready-${index}.mp4`); let captions = [];
+  try { const result = await execFile('python', [join(fileURLToPath(new URL('.', import.meta.url)), 'scripts', 'stt.py'), clipPath, vttPath], { windowsHide: true, timeoutMs: 300000 }); const output = JSON.parse(result.stdout.trim()); captions = output.captions || []; } catch {}
+  const crop = 'crop=ih*9/16:ih:(iw-ow)/2:0,scale=720:1280'; const captionFile = vttPath.replaceAll('\\', '/').replaceAll(':', '\\:'); const filters = [crop];
+  if (captions.length) filters.push(`subtitles=filename='${captionFile}':force_style='FontSize=28,PrimaryColour=&H00FFFFFF,Alignment=2,Outline=2,MarginV=70'`);
+  await execFile('ffmpeg', ['-y', '-i', clipPath, '-vf', filters.join(','), '-t', String(duration), '-c:v', 'libx264', '-preset', 'veryfast', '-c:a', 'aac', '-movflags', '+faststart', readyPath], { windowsHide: true, timeoutMs: 180000 });
+  return { path: readyPath, captions };
+}
+
 async function extractClip(sourcePath, projectId, index, start, end) {
   const clipPath = join(uploadRoot, `${projectId}-clip-${index}.mp4`); const thumbPath = join(uploadRoot, `${projectId}-clip-${index}.jpg`);
   const duration = Math.max(0.5, end - start);
   await execFile('ffmpeg', ['-y', '-ss', String(start), '-i', sourcePath, '-t', String(duration), '-vf', 'scale=720:-2', '-c:v', 'libx264', '-preset', 'veryfast', '-c:a', 'aac', '-movflags', '+faststart', clipPath], { windowsHide: true, timeoutMs: 180000 });
-  await execFile('ffmpeg', ['-y', '-ss', String(start), '-i', sourcePath, '-frames:v', '1', '-q:v', '3', thumbPath], { windowsHide: true, timeoutMs: 60000 });
+  let ready;
+  try { ready = await makeReadyClip(clipPath, projectId, index, duration); }
+  catch { ready = { path: clipPath, captions: [], fallback: true }; }
+  await execFile('ffmpeg', ['-y', '-i', ready.path, '-frames:v', '1', '-q:v', '3', thumbPath], { windowsHide: true, timeoutMs: 60000 });
   const audio = await measureAudio(clipPath, duration);
   const durationFit = Math.max(0, Math.min(1, 1 - Math.abs(duration - 22) / 22));
   const scoreBreakdown = { speechCoverage: audio.speechCoverage, silenceEvents: audio.silenceEvents, durationFit: Number(durationFit.toFixed(3)), evidence: ['실제 오디오 무음 구간', '클립 길이'] };
-  return { id: `${projectId}-${index}`, start, end, duration, title: `핵심 장면 ${index}`, score: audio.score, scoreType: '기초 오디오 지표', metrics: audio, scoreBreakdown, previewUrl: `/media/${basename(clipPath)}`, thumbnailUrl: `/media/${basename(thumbPath)}` };
+  return { id: `${projectId}-${index}`, start, end, duration, title: `핵심 장면 ${index}`, score: audio.score, scoreType: '기초 오디오 지표', metrics: audio, scoreBreakdown, captions: ready.captions, ready: !ready.fallback, aspectRatio: ready.fallback ? 'source' : '9:16', previewUrl: `/media/${basename(ready.path)}`, sourcePreviewUrl: `/media/${basename(clipPath)}`, thumbnailUrl: `/media/${basename(thumbPath)}` };
 }
 
 async function renderSegments(sourcePath, projectId, segments) {
@@ -162,9 +174,15 @@ async function handleApi(req, res, url) {
     if (match[2] === 'preview' && project.sourceType === 'file') { const previewPath = await extractPreview(project.source, project.id); json(res, 200, { ok: Boolean(previewPath), previewPath }); return true; }
     project.status = 'analyzing'; project.progress = 18; await writeFile(projectPath, JSON.stringify(project, null, 2));
     if (project.sourceType === 'file') { project.previewPath = await extractPreview(project.source, project.id); project.previewUrl = project.previewPath ? `/media/${basename(project.previewPath)}` : null; }
-    const total = Number(project.metadata?.duration || 15); const firstEnd = Math.min(15, total); const secondStart = Math.min(15, total); const secondEnd = Math.min(35, total);
-    project.clips = [await extractClip(project.source, project.id, 1, 0, firstEnd)];
-    if (secondEnd > secondStart + 0.5) project.clips.push(await extractClip(project.source, project.id, 2, secondStart, secondEnd));
+    const total = Number(project.metadata?.duration || 15);
+    const window = Math.min(22, total);
+    const starts = [...new Set([0, total * 0.2, total * 0.4, total * 0.6, total * 0.8].map(value => Math.max(0, Math.min(Math.max(0, total - window), value))))];
+    project.clips = [];
+    for (let index = 0; index < starts.length; index += 1) {
+      const start = starts[index];
+      if (window > 0.5) project.clips.push(await extractClip(project.source, project.id, index + 1, start, Math.min(total, start + window)));
+    }
+    if (project.clips[0]) { project.previewUrl = project.clips[0].previewUrl; project.previewPath = join(uploadRoot, basename(project.clips[0].previewUrl)); project.captions = project.clips[0].captions || []; }
     project.status = 'completed'; project.progress = 100;
     await writeFile(projectPath, JSON.stringify(project, null, 2)); json(res, 200, project); return true;
   }

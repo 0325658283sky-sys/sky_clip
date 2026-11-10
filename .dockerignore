@@ -1,0 +1,10 @@
+node_modules
+.git
+.github
+uploads
+renders
+skyclip-data.json
+test-*.mp4
+test-*.webm
+*.log
+.env

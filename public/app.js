@@ -1,5 +1,5 @@
 const app = document.querySelector('#app');
-const state = { route: location.hash.slice(1) || 'dashboard', input: '', file: null, project: null, clipTitle: '제주도 학생의 미친 삼행시 수준', saved: false, history: [], future: [] };
+const state = { route: location.hash.slice(1) || 'dashboard', input: '', file: null, project: null, clipTitle: '제주도 학생의 미친 삼행시 수준', saved: false, history: [], future: [], captionStyle: { fontSize: 28, color: '#ffffff' }, burnCaptions: true };
 const clips = [];
 function navigate(route) { state.route = route; location.hash = route; render(); }
 function toast(message) { const node = document.createElement('div'); node.className = 'toast'; node.textContent = message; document.body.append(node); setTimeout(() => node.remove(), 2400); }
@@ -44,7 +44,7 @@ function bind() {
     if (action === 'export') {
       if (!state.project?.id) { toast('먼저 영상을 분석하세요.'); return; }
       toast('MP4를 렌더링하는 중입니다.');
-      const response = await fetch(`/api/projects/${state.project.id}/export`, { method: 'POST' });
+      const response = await fetch(`/api/projects/${state.project.id}/export`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ burnCaptions: state.burnCaptions, captionStyle: state.captionStyle, templateId: state.project.edit?.templateId || null }) });
       if (!response.ok) { toast('내보내기에 실패했습니다.'); return; }
       const data = await response.json(); toast('MP4 렌더링이 완료되었습니다.'); window.open(data.downloadUrl, '_blank');
     }
@@ -58,7 +58,7 @@ function bind() {
     inspectorPanel.querySelector('.tool-feedback')?.remove(); const panel = document.createElement('div'); panel.className = 'tool-feedback';
     if (name === '제목') { panel.innerHTML = `<h3>제목 편집</h3><input value="${state.clipTitle}"><button>적용</button>`; panel.querySelector('button').onclick = () => { state.clipTitle = panel.querySelector('input').value.trim() || state.clipTitle; const label = document.querySelector('.editor-bar b'); if (label) label.textContent = state.clipTitle; toast('제목이 적용되었습니다.'); }; }
     else if (name === '자막') { panel.innerHTML = '<h3>자막 편집</h3><p>직접 입력하거나 실제 음성에서 자동 자막을 생성합니다.</p><button data-stt>자동 자막 생성</button>'; panel.querySelector('[data-stt]').onclick = async () => { if (!state.project?.id) return; toast('음성을 분석해 자막을 생성하는 중입니다.'); const response = await fetch(`/api/projects/${state.project.id}/stt`, { method: 'POST' }); const data = await response.json(); if (response.ok) { state.project = { ...state.project, captions: data.captions, captionUrl: data.captionUrl, stt: data.stt }; toast(`자동 자막 ${data.captions.length}개가 생성되었습니다.`); render(); } else toast(data.error || '자동 자막 생성에 실패했습니다.'); }; document.querySelector('.caption-editor')?.scrollIntoView({ behavior: 'smooth' }); }
-    else if (name === '템플릿') { panel.innerHTML = '<h3>템플릿</h3><p>저장된 템플릿을 관리합니다.</p><button>템플릿 화면 열기</button>'; panel.querySelector('button').onclick = () => navigate('templates'); }
+    else if (name === '템플릿') { panel.innerHTML = '<h3>템플릿</h3><p>저장된 템플릿을 선택하면 내보내기에 반영됩니다.</p><select data-template><option>불러오는 중...</option></select>'; const select = panel.querySelector('[data-template]'); fetch('/api/templates').then(response => response.json()).then(data => { select.innerHTML = '<option value="">기본 스타일</option>' + (data.templates || []).map(item => `<option value="${item.id}">${item.name} · ${item.aspectRatio}</option>`).join(''); select.onchange = async () => { if (!select.value || !state.project?.id) return; state.project.edit = { ...(state.project.edit || {}), templateId: select.value }; await fetch(`/api/projects/${state.project.id}/edit`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title: state.clipTitle, templateId: select.value, captionStyle: state.captionStyle }) }); toast('템플릿이 편집 프로젝트에 적용되었습니다.'); }; }).catch(() => { select.innerHTML = '<option>템플릿을 불러오지 못했습니다.</option>'; }); }
     else if (['이미지', '영상', '오디오', '요소'].includes(name)) { panel.innerHTML = `<h3>${name} 에셋</h3><p>에셋 보관함에서 파일을 선택해 추가할 수 있습니다.</p><button>에셋 보관함 열기</button>`; panel.querySelector('button').onclick = () => navigate('assets'); }
     else if (name === '설정') { panel.innerHTML = '<h3>캔버스 설정</h3><button data-ratio="9:16">9:16 세로</button><button data-ratio="1:1">1:1 정사각형</button>'; panel.querySelectorAll('button').forEach(button => button.onclick = () => { document.querySelector('.canvas-inner').style.aspectRatio = button.dataset.ratio.replace(':', ' / '); toast(`캔버스 비율 ${button.dataset.ratio} 적용`); }); }
     else if (name === '무음 구간 제거' && state.project?.id) { panel.innerHTML = '<h3>무음 구간 제거</h3><p>실제 오디오에서 긴 무음 구간을 제거합니다.</p><button>실행</button>'; panel.querySelector('button').onclick = async () => { toast('무음 구간을 분석하는 중입니다.'); const response = await fetch(`/api/projects/${state.project.id}/tools/silence`, { method: 'POST' }); if (response.ok) { const data = await response.json(); state.project = { ...state.project, previewUrl: data.previewUrl }; toast('무음 구간 제거가 적용되었습니다.'); } else toast('무음 구간 제거에 실패했습니다.'); }; }
@@ -99,7 +99,7 @@ function bind() {
   const saveEditor = document.querySelector('.editor-bar [data-action="save"]');
   if (saveEditor && state.project?.id) saveEditor.addEventListener('click', async () => {
     const current = document.querySelector('.editor-video')?.currentTime || 0;
-    await fetch(`/api/projects/${state.project.id}/edit`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title: state.clipTitle, start: 0, end: current || null, segments: [{ start: 0, end: current || null }] }) });
+    await fetch(`/api/projects/${state.project.id}/edit`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title: state.clipTitle, start: 0, end: current || null, segments: [{ start: 0, end: current || null }], captionStyle: state.captionStyle }) });
   });
   const dropzone = document.querySelector('.dropzone');
   if (dropzone && state.route === 'templates') {
@@ -109,6 +109,7 @@ function bind() {
   if (dropzone && state.route === 'assets') {
     const assetInput = document.createElement('input'); assetInput.type = 'file'; assetInput.accept = 'image/*,video/*,audio/*,.ttf,.otf'; assetInput.className = 'asset-picker'; dropzone.append(assetInput);
     assetInput.onchange = async () => { const file = assetInput.files[0]; if (!file) return; const response = await fetch('/api/assets', { method: 'POST', headers: { 'content-type': file.type || 'application/octet-stream', 'x-file-name': file.name, 'x-asset-kind': file.type.split('/')[0] || 'file' }, body: file }); if (response.ok) toast('에셋이 저장되었습니다.'); else toast('에셋 업로드에 실패했습니다.'); };
+    fetch('/api/assets').then(response => response.json()).then(data => { const list = document.createElement('div'); list.className = 'asset-list'; list.innerHTML = (data.assets || []).map(asset => `<div class="asset-row"><b>${asset.name}</b><span>${asset.kind}</span></div>`).join('') || '<div class="muted">저장된 에셋이 없습니다.</div>'; dropzone.after(list); }).catch(() => {});
   }
 }
 render();

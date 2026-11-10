@@ -60,7 +60,22 @@ async function extractClip(sourcePath, projectId, index, start, end) {
   const duration = Math.max(0.5, end - start);
   await execFile('ffmpeg', ['-y', '-ss', String(start), '-i', sourcePath, '-t', String(duration), '-vf', 'scale=720:-2', '-c:v', 'libx264', '-preset', 'veryfast', '-c:a', 'aac', '-movflags', '+faststart', clipPath], { windowsHide: true, timeoutMs: 180000 });
   await execFile('ffmpeg', ['-y', '-ss', String(start), '-i', sourcePath, '-frames:v', '1', '-q:v', '3', thumbPath], { windowsHide: true, timeoutMs: 60000 });
-  return { id: `${projectId}-${index}`, start, end, duration, title: `핵심 장면 ${index}`, score: null, previewUrl: `/media/${basename(clipPath)}`, thumbnailUrl: `/media/${basename(thumbPath)}` };
+  const audio = await measureAudio(clipPath, duration);
+  return { id: `${projectId}-${index}`, start, end, duration, title: `핵심 장면 ${index}`, score: audio.score, scoreType: '기초 오디오 지표', metrics: audio, previewUrl: `/media/${basename(clipPath)}`, thumbnailUrl: `/media/${basename(thumbPath)}` };
+}
+
+async function measureAudio(filePath, duration) {
+  try {
+    const result = await execFile('ffmpeg', ['-hide_banner', '-i', filePath, '-af', 'silencedetect=noise=-35dB:d=0.45', '-f', 'null', '-'], { windowsHide: true, timeoutMs: 60000 });
+    const silenceStarts = (result.stderr.match(/silence_start:/g) || []).length;
+    const silenceEnds = (result.stderr.match(/silence_end:/g) || []).length;
+    const silenceEvents = Math.max(silenceStarts, silenceEnds);
+    const silenceRatio = Math.min(1, silenceEvents * 0.12);
+    const speechCoverage = Math.max(0, 1 - silenceRatio);
+    return { hasAudio: true, speechCoverage: Number(speechCoverage.toFixed(3)), silenceEvents, score: Math.round(50 + speechCoverage * 50) };
+  } catch {
+    return { hasAudio: false, speechCoverage: null, silenceEvents: null, score: null };
+  }
 }
 
 async function downloadYouTube(url, outputPath) {
@@ -97,6 +112,11 @@ async function handleApi(req, res, url) {
   }
   if (req.method === 'POST' && url.pathname === '/api/assets') {
     const id = randomUUID(); const name = String(req.headers['x-file-name'] || 'asset.bin').replace(/[^a-zA-Z0-9._-]/g, '_'); const assetPath = join(uploadRoot, `${id}-${name}`); await writeFile(assetPath, await readBody(req)); const asset = { id, name, kind: String(req.headers['x-asset-kind'] || 'file'), url: `/media/${basename(assetPath)}`, createdAt: new Date().toISOString() }; await writeFile(join(dataRoot, `asset-${id}.json`), JSON.stringify(asset, null, 2)); json(res, 201, asset); return true;
+  }
+  if (req.method === 'GET' && url.pathname === '/api/assets') {
+    const entries = await (await import('node:fs/promises')).readdir(dataRoot, { withFileTypes: true }); const assets = [];
+    for (const entry of entries) if (entry.isFile() && entry.name.startsWith('asset-') && entry.name.endsWith('.json')) { try { assets.push(JSON.parse(await readFile(join(dataRoot, entry.name), 'utf8'))); } catch {} }
+    json(res, 200, { assets }); return true;
   }
   if (req.method === 'POST' && url.pathname === '/api/projects') {
     const projectId = randomUUID(); const contentType = req.headers['content-type'] || '';
@@ -142,14 +162,23 @@ async function handleApi(req, res, url) {
   }
   if (req.method === 'POST' && exportMatch) {
     const projectPath = join(dataRoot, `${exportMatch[1]}.json`); const project = JSON.parse(await readFile(projectPath, 'utf8'));
+    let exportOptions = {}; try { const body = await readBody(req, 1024 * 1024); if (body.length) exportOptions = JSON.parse(body.toString('utf8')); } catch {}
     const source = project.previewPath || project.source; if (!source) throw new Error('내보낼 영상이 없습니다.');
     const output = join(uploadRoot, `${project.id}-export.mp4`);
     const start = Math.max(0, Number(project.edit?.start ?? 0));
     const duration = project.edit?.end ? Math.max(0.1, Number(project.edit.end) - start) : null;
+    if (exportOptions.templateId) {
+      const templateFile = join(dataRoot, 'templates.json'); let templates = []; try { templates = JSON.parse(await readFile(templateFile, 'utf8')); } catch {}
+      const template = templates.find(item => item.id === exportOptions.templateId); if (template) exportOptions.captionStyle = exportOptions.captionStyle || template.captionStyle;
+      project.edit = { ...(project.edit || {}), templateId: exportOptions.templateId };
+    }
+    if (exportOptions.captionStyle) project.edit = { ...(project.edit || {}), captionStyle: exportOptions.captionStyle };
     const args = ['-y', '-ss', String(start), '-i', source];
+    let filter = 'scale=720:-2';
     if (duration) args.push('-t', String(duration));
     if (project.captionPath) args.push('-f', 'webvtt', '-i', project.captionPath, '-map', '0:v:0', '-map', '0:a?', '-map', '1:0', '-c:s', 'mov_text');
-    args.push('-vf', 'scale=720:-2', '-c:v', 'libx264', '-preset', 'veryfast', '-c:a', 'aac', '-movflags', '+faststart', output);
+    if (exportOptions.burnCaptions && project.captionPath) { const captionFile = project.captionPath.replaceAll('\\', '/').replaceAll(':', '\\:'); const style = project.edit?.captionStyle || {}; const fontSize = Math.max(12, Math.min(72, Number(style.fontSize) || 28)); filter = `subtitles=filename='${captionFile}':force_style='FontSize=${fontSize},Alignment=2,Outline=2,MarginV=36',${filter}`; }
+    args.push('-vf', filter, '-c:v', 'libx264', '-preset', 'veryfast', '-c:a', 'aac', '-movflags', '+faststart', output);
     await execFile('ffmpeg', args, { windowsHide: true });
     project.exportPath = output; project.exportUrl = `/media/${basename(output)}`; project.exportStatus = 'completed';
     await writeFile(projectPath, JSON.stringify(project, null, 2)); json(res, 200, { ok: true, downloadUrl: project.exportUrl }); return true;
@@ -158,7 +187,7 @@ async function handleApi(req, res, url) {
   if (req.method === 'POST' && editMatch) {
     const projectPath = join(dataRoot, `${editMatch[1]}.json`); const project = JSON.parse(await readFile(projectPath, 'utf8'));
     const payload = JSON.parse((await readBody(req, 2 * 1024 * 1024)).toString('utf8'));
-    project.edit = { start: Math.max(0, Number(payload.start) || 0), end: payload.end == null ? null : Math.max(0, Number(payload.end)), segments: Array.isArray(payload.segments) ? payload.segments : [] };
+    project.edit = { start: Math.max(0, Number(payload.start) || 0), end: payload.end == null ? null : Math.max(0, Number(payload.end)), segments: Array.isArray(payload.segments) ? payload.segments : [], tool: payload.tool || project.edit?.tool || null, templateId: payload.templateId || project.edit?.templateId || null, captionStyle: payload.captionStyle || project.edit?.captionStyle || null };
     if (typeof payload.title === 'string' && payload.title.trim()) project.title = payload.title.trim();
     await writeFile(projectPath, JSON.stringify(project, null, 2)); json(res, 200, { ok: true, edit: project.edit }); return true;
   }

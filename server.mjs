@@ -184,6 +184,7 @@ async function handleApi(req, res, url) {
     for (let index = 0; index < starts.length; index += 1) {
       const start = starts[index];
       if (window > 0.5) project.clips.push(await extractClip(project.source, project.id, index + 1, start, Math.min(total, start + window)));
+      project.progress = Math.min(92, 25 + Math.round(((index + 1) / starts.length) * 67)); project.updatedAt = new Date().toISOString(); await writeFile(projectPath, JSON.stringify(project, null, 2));
     }
     if (project.clips[0]) { project.previewUrl = project.clips[0].previewUrl; project.previewPath = join(uploadRoot, basename(project.clips[0].previewUrl)); project.captions = project.clips[0].captions || []; }
     project.status = 'completed'; project.progress = 100;

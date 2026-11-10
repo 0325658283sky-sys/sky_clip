@@ -1,7 +1,3 @@
+.skyclip-data/
 node_modules/
-*.log
-renders/*
-!renders/.gitkeep
-.ready-check.json
-.prompt-verify.json
-.DS_Store
+test-e2e.mp4

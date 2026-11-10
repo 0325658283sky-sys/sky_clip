@@ -1,368 +1,189 @@
 import { createServer } from 'node:http';
-import { randomUUID } from 'node:crypto';
-import { createHmac, timingSafeEqual } from 'node:crypto';
-import { readFile, writeFile, mkdir, rename, stat, unlink, access } from 'node:fs/promises';
-import { extname, join, dirname } from 'node:path';
+import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { basename, extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { createReadStream } from 'node:fs';
-import { createWriteStream } from 'node:fs';
-import { pipeline } from 'node:stream/promises';
-import { Transform, Readable } from 'node:stream';
+import { promisify } from 'node:util';
 
-const projects = new Map();
-const creditRequests = new Map();
-let creditBalance = 300;
-const creditBalances = new Map();
-const root = fileURLToPath(new URL('.', import.meta.url));
-const maxUploadBytes = 4 * 1024 * 1024 * 1024;
-const uploadDir = process.env.SKYCLIP_UPLOAD_DIR || join(root, 'uploads');
-const renderDir = process.env.SKYCLIP_RENDER_DIR || join(root, 'renders');
-const dataFile = process.env.SKYCLIP_DATA_FILE || join(root, 'skyclip-data.json');
-await mkdir(renderDir, { recursive: true });
-await mkdir(uploadDir, { recursive: true });
-const mime = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.json': 'application/json; charset=utf-8' };
-try {
-  const saved = JSON.parse(await readFile(dataFile, 'utf8'));
-  creditBalance = saved.creditBalance ?? 300;
-  for (const [workspaceId, balance] of Object.entries(saved.creditBalances || {})) creditBalances.set(workspaceId, Number(balance));
-  if (!creditBalances.size) creditBalances.set('demo-workspace', creditBalance);
-  for (const project of saved.projects || []) projects.set(project.id, { workspaceId: project.workspaceId || 'demo-workspace', ...project });
-} catch (error) {
-  console.warn(`[SkyClip] 저장 데이터 로드 실패: ${error?.message || error}. 기본 상태로 시작합니다.`);
+const root = join(fileURLToPath(new URL('.', import.meta.url)), 'public');
+const dataRoot = join(fileURLToPath(new URL('.', import.meta.url)), '.skyclip-data');
+const uploadRoot = join(dataRoot, 'uploads');
+const requestedPort = Number(process.env.PORT || 8787);
+const types = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml' };
+const execFile = promisify((file, args, options, callback) => {
+  const child = spawn(file, args, options);
+  let stdout = ''; let stderr = '';
+  child.stdout.on('data', chunk => { stdout += chunk; });
+  child.stderr.on('data', chunk => { stderr += chunk; });
+  child.on('error', callback);
+  child.on('close', code => code === 0 ? callback(null, { stdout, stderr }) : callback(Object.assign(new Error(stderr || `Command failed: ${file}`), { code, stdout, stderr })));
+});
+
+await mkdir(uploadRoot, { recursive: true });
+
+function json(res, status, value) {
+  res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+  res.end(JSON.stringify(value));
 }
-let persistQueue = Promise.resolve();
-const persist = () => { persistQueue = persistQueue.then(async () => { const tempFile = `${dataFile}.tmp`; await writeFile(tempFile, JSON.stringify({ creditBalance, creditBalances: Object.fromEntries(creditBalances), projects: [...projects.values()] }, null, 2), 'utf8'); await rename(tempFile, dataFile); }).catch(() => {}); return persistQueue; };
-const logProject = (id, message) => { const project = projects.get(id); if (!project) return; projects.set(id, { ...project, logs: [...(project.logs || []), { message, at: new Date().toISOString() }] }); persist(); };
-const buildResultClips = (project) => {
-  const sourceLabel = project.source ? '분석 영상' : '새 프로젝트';
-  const titles = [`${sourceLabel}의 핵심 장면`, '가장 중요한 반전이 나오는 순간', '짧고 강한 한 문장', '공감을 만드는 설명', '비교로 이해하는 핵심 내용', '마무리 메시지'];
-  const reasons = ['강렬한 시작과 명확한 문제 의식이 있어 짧은 영상에서도 메시지가 빠르게 전달됩니다.', '대상과 반전이 분명해 초반 이탈을 줄일 수 있는 클립입니다.', '짧고 독립적인 문장으로 구성돼 빠른 소비에 적합합니다.', '공감과 궁금증을 동시에 만드는 설명형 클립입니다.', '비교 구조가 명확해 정보 전달형 숏폼으로 적합합니다.', '감정적 긴장감이 높아 후킹 제목과 함께 사용하기 좋습니다.'];
-  const total = Math.max(6, Number(project.duration) || 283);
-  const detected = [...new Set((project.scenePoints || []).filter(point => Number.isFinite(Number(point))).map(Number).filter(point => point > 0 && point < total))].sort((a, b) => a - b);
-  const boundaries = detected.length >= 2 ? [0, ...detected, total] : Array.from({ length: 7 }, (_, index) => Math.round(index * total / 6));
-  const ranges = Array.from({ length: 6 }, (_, index) => { const start = boundaries[Math.min(index, boundaries.length - 2)]; const end = boundaries[Math.min(index + 1, boundaries.length - 1)]; return { start: Math.round(start), end: Math.max(Math.round(start + 1), Math.round(end)) }; });
-  const formatDuration = seconds => `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(Math.max(0, Math.round(seconds % 60))).padStart(2, '0')}`;
-  return titles.map((title, index) => { const { start, end } = ranges[index]; const cueText = (project.captionCues || []).map((cue, cueIndex) => cue.end > start && cue.start < end ? project.captions?.[cueIndex] : '').filter(Boolean).join(' '); const subtitleText = cueText || project.captions?.[index] || '핵심 메시지가 시작부터 선명하게 전달되는 추천 클립입니다.'; const generatedTitle = cueText ? cueText.replace(/[^\p{L}\p{N}\s?!.,]/gu, '').trim().slice(0, 32) : title; const score = Math.min(99, 68 + Math.min(15, Math.round(subtitleText.length / 80 * 15)) + (detected.length ? 10 : 0) + Math.max(0, 6 - index)); const scoreBreakdown = { overall: score, hook: Math.max(0, score - 2 + (index % 3)), context: Math.max(0, score - 4), flow: Math.max(0, score - 3), immersion: Math.max(0, score - 1), ending: Math.max(0, score - 5) }; const sceneEvidence = detected.length ? '장면 변화와 자막 타이밍을 함께 반영했습니다.' : '자막 구간과 영상 길이를 기준으로 분석했습니다.'; return { id: `${project.id}-clip-0${index + 1}`, title: generatedTitle || title, duration: formatDuration(end - start), viralScore: score, scoreBreakdown, scoreReason: `${reasons[index]} ${sceneEvidence}`, subtitleText, start, end }; });
-};
-  const escapeFfmpegText = value => String(value || '').replace(/\\/g, '\\\\').replace(/:/g, '\\:').replace(/'/g, "\\'").replace(/%/g, '\\%').replace(/[\r\n]+/g, ' ');
-const extractResultClips = async project => {
-  if (!project.renderInput) return project;
-  const allClips = project.resultSet?.clips?.length ? project.resultSet.clips : buildResultClips(project);
-  const clips = allClips.filter(clip => !Number.isFinite(Number(project.duration)) || clip.start < Number(project.duration));
-  await Promise.all(allClips.map(clip => unlink(join(renderDir, `${project.id}-${clip.id}.mp4`)).catch(() => {})));
-  const extracted = [];
-  for (const clip of clips.slice(0, 6)) {
-    const output = join(renderDir, `${project.id}-${clip.id}.mp4`);
-    const duration = Math.max(0.5, clip.end - clip.start);
-    await new Promise(resolve => {
-      const hook = escapeFfmpegText(clip.title);
-      const captionLines = String(clip.subtitleText || '').match(/.{1,24}(?:\\s+|$)/g)?.map(line => line.trim()).slice(0, 3).join('\\n') || clip.subtitleText;
-      const caption = escapeFfmpegText(captionLines);
-      const focusX = Number.isFinite(Number(clip.focusX)) ? Math.max(0, Math.min(1, Number(clip.focusX))) : 0.5;
-      const focusY = Number.isFinite(Number(clip.focusY)) ? Math.max(0, Math.min(1, Number(clip.focusY))) : 0.5;
-      const cropX = `(iw-1080)*${focusX.toFixed(4)}`;
-      const cropY = `(ih-1920)*${focusY.toFixed(4)}`;
-      const filter = `scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920:${cropX}:${cropY},drawtext=fontfile='C\\:/Windows/Fonts/malgun.ttf':text='${hook}':fontcolor=white:fontsize=54:borderw=4:bordercolor=black@0.75:box=1:boxcolor=black@0.28:boxborderw=18:x=(w-text_w)/2:y=150,drawtext=fontfile='C\\:/Windows/Fonts/malgun.ttf':text='${caption}':fontcolor=white:fontsize=42:borderw=3:bordercolor=black@0.75:box=1:boxcolor=black@0.68:boxborderw=24:x=(w-text_w)/2:y=h-340`;
-      const child = spawn(process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg', ['-y', '-ss', String(clip.start), '-i', project.renderInput, '-t', String(duration), '-vf', filter, '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-c:a', 'aac', '-movflags', '+faststart', output], { stdio: ['ignore', 'ignore', 'ignore'] });
-      child.on('close', async code => { if (code === 0) { try { const info = await stat(output); if (info.size > 1000) extracted.push({ ...clip, previewUrl: `/api/projects/${project.id}/results/${clip.id}` }); } catch {} } resolve(); });
-      child.on('error', () => resolve());
-    });
+
+async function readBody(req, limit = 1024 * 1024 * 1024) {
+  const chunks = []; let size = 0;
+  for await (const chunk of req) { size += chunk.length; if (size > limit) throw new Error('파일이 너무 큽니다. 최대 1GB까지 지원합니다.'); chunks.push(chunk); }
+  return Buffer.concat(chunks);
+}
+
+async function probe(filePath) {
+  try {
+    const result = await execFile('ffprobe', ['-v', 'error', '-show_entries', 'format=duration,size:stream=width,height,codec_name', '-of', 'json', filePath], { windowsHide: true });
+    const parsed = JSON.parse(result.stdout);
+    const video = parsed.streams?.find(stream => stream.width || stream.height) || {};
+    return { duration: Number(parsed.format?.duration || 0), size: Number(parsed.format?.size || 0), width: video.width || null, height: video.height || null, codec: video.codec_name || null };
+  } catch (error) {
+    return { duration: 0, size: 0, width: null, height: null, codec: null, probeError: error.message };
   }
-  if (!extracted.length) return project.renderInput ? { ...project, resultSet: { ...(project.resultSet || {}), clips: allClips.map(clip => ({ ...clip, previewUrl: `/api/projects/${project.id}/source` })) } } : project;
-  const extractedById = new Map(extracted.map(clip => [clip.id, clip.previewUrl]));
-  return { ...project, resultSet: { ...(project.resultSet || {}), clips: allClips.map(clip => extractedById.has(clip.id) ? { ...clip, previewUrl: extractedById.get(clip.id) } : clip) } };
-};
-const sttUrl = process.env.SKYCLIP_STT_URL || '';
-const analysisProvider = process.env.SKYCLIP_ANALYSIS_PROVIDER || (sttUrl ? 'external-stt' : 'local');
-const sttToken = process.env.SKYCLIP_STT_TOKEN || '';
-const sttTimeoutMs = Math.max(5000, Number(process.env.SKYCLIP_STT_TIMEOUT_MS || 120000));
-const highlightUrl = process.env.SKYCLIP_HIGHLIGHT_URL || '';
-const highlightToken = process.env.SKYCLIP_HIGHLIGHT_TOKEN || '';
-const highlightTimeoutMs = Math.max(5000, Number(process.env.SKYCLIP_HIGHLIGHT_TIMEOUT_MS || 60000));
-const workspaceSecret = process.env.SKYCLIP_WORKSPACE_SECRET || '';
-const buildAnalysisState = (project, stage = 'queued') => ({ provider: analysisProvider, mode: analysisProvider === 'local' ? 'fallback' : 'external', method: project.analysisMethod || 'transcript fallback', scenePoints: project.scenePoints?.length || 0, stage, sourceType: project.sourceType || (project.source === 'local-video' ? 'upload' : 'url'), transcriptReady: stage === 'ready', highlightsReady: stage === 'ready' });
-const isYoutubeUrl = value => /(?:youtube\.com|youtu\.be)/i.test(String(value || ''));
-const isDirectMediaUrl = value => { try { return /\.(?:mp4|mov|webm)(?:$|[?#])/i.test(new URL(String(value || '')).pathname); } catch { return false; } };
-const isHttpUrl = value => { try { const url = new URL(String(value || '')); return ['http:', 'https:'].includes(url.protocol); } catch { return false; } };
-const probeMedia = file => new Promise(resolve => { const child = spawn('ffprobe', ['-v', 'error', '-show_entries', 'format=duration:stream=width,height', '-of', 'json', file], { stdio: ['ignore', 'pipe', 'ignore'] }); let raw = ''; child.stdout.on('data', chunk => { raw += String(chunk); }); child.on('close', () => { try { const parsed = JSON.parse(raw); const stream = parsed.streams?.find(item => item.width || item.height) || {}; resolve({ duration: Number(parsed.format?.duration) || null, width: Number(stream.width) || null, height: Number(stream.height) || null }); } catch { resolve({ duration: null, width: null, height: null }); } }); child.on('error', () => resolve({ duration: null, width: null, height: null })); });
-const commandAvailable = command => new Promise(resolve => { const child = spawn(command, ['-version'], { stdio: 'ignore' }); child.on('close', code => resolve(code === 0)); child.on('error', () => resolve(false)); });
-const detectScenePoints = file => new Promise(resolve => { if (!file) return resolve([]); const child = spawn(process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg', ['-hide_banner', '-i', file, '-vf', "select='gt(scene,0.28)',showinfo", '-f', 'null', '-'], { stdio: ['ignore', 'ignore', 'pipe'] }); let raw = ''; child.stderr.on('data', chunk => { raw += String(chunk); }); child.on('close', () => { const points = [...raw.matchAll(/pts_time:([0-9.]+)/g)].map(match => Number(match[1])).filter(Number.isFinite); resolve([...new Set(points.map(value => Math.round(value * 10) / 10))].slice(0, 24)); }); child.on('error', () => resolve([])); });
-const exportFormats = { '9:16': [1080, 1920], '1:1': [1080, 1080], '16:9': [1920, 1080] };
-const getExportFormat = value => exportFormats[value] ? value : '9:16';
-const parseVtt = raw => raw.split(/\r?\n\r?\n/).map(block => { const lines = block.split(/\r?\n/).map(line => line.trim()).filter(Boolean); const timeIndex = lines.findIndex(line => line.includes('-->')); if (timeIndex < 0) return null; const times = lines[timeIndex].split('-->').map(value => value.trim().split(' ')[0]); const toSeconds = value => { const parts = value.replace(',', '.').split(':').map(Number); return parts.length === 3 ? parts[0] * 3600 + parts[1] * 60 + parts[2] : parts[0] * 60 + parts[1]; }; const text = lines.slice(timeIndex + 1).join(' ').replace(/<[^>]+>/g, '').trim(); return text ? { start: toSeconds(times[0]), end: toSeconds(times[1]), text } : null; }).filter(Boolean);
-const collectYoutubeCaptions = project => new Promise(resolve => { const pattern = join(root, 'uploads', `${project.id}.%(ext)s`); const child = spawn('yt-dlp', ['--no-playlist', '--write-auto-subs', '--sub-langs', 'ko,en', '--sub-format', 'vtt', '--skip-download', '-o', pattern, project.source], { stdio: ['ignore', 'ignore', 'ignore'] }); child.on('close', async () => { for (const language of ['ko', 'en']) { try { const raw = await readFile(join(root, 'uploads', `${project.id}.${language}.vtt`), 'utf8'); const cues = parseVtt(raw); if (cues.length) return resolve({ captions: cues.map(cue => cue.text), captionCues: cues.map(({ start, end }) => ({ start, end })) }); } catch {} } resolve({ captions: [], captionCues: [] }); }); child.on('error', () => resolve({ captions: [], captionCues: [] })); });
-const completeAnalysis = project => { const clips = buildResultClips(project); const captions = project.captions?.length ? project.captions : clips.slice(0, 3).map(clip => clip.subtitleText); const captionCues = project.captionCues?.length ? project.captionCues : clips.slice(0, 3).map(clip => ({ start: clip.start, end: clip.end })); return { ...project, status: 'ready', progress: 100, analysis: buildAnalysisState(project, 'ready'), captions, captionCues, resultSet: { sourceVideo: { title: project.title, source: project.source }, clips } }; };
-const requestExternalHighlights = async project => { if (!highlightUrl) return null; try { const response = await fetch(highlightUrl, { method: 'POST', headers: { 'content-type': 'application/json', ...(highlightToken ? { authorization: `Bearer ${highlightToken}` } : {}) }, body: JSON.stringify({ duration: project.duration, captions: project.captions || [], captionCues: project.captionCues || [], scenePoints: project.scenePoints || [], reframe: { enabled: true, focusX: '0..1', focusY: '0..1' } }), signal: AbortSignal.timeout(highlightTimeoutMs) }); if (!response.ok) throw new Error(`highlight gateway ${response.status}`); const payload = await response.json(); const clips = Array.isArray(payload.clips) ? payload.clips.filter(clip => Number.isFinite(Number(clip.start)) && Number(clip.end) > Number(clip.start)).slice(0, 6).map((clip, index) => ({ id: `${project.id}-clip-0${index + 1}`, title: String(clip.title || `추천 클립 ${index + 1}`), duration: clip.duration || `${String(Math.floor((clip.end - clip.start) / 60)).padStart(2, '0')}:${String(Math.round((clip.end - clip.start) % 60)).padStart(2, '0')}`, viralScore: Math.max(0, Math.min(100, Number(clip.viralScore) || 70)), scoreReason: String(clip.scoreReason || '외부 하이라이트 모델이 선택한 구간입니다.'), subtitleText: String(clip.subtitleText || ''), focusX: Number.isFinite(Number(clip.focusX)) ? Math.max(0, Math.min(1, Number(clip.focusX))) : 0.5, focusY: Number.isFinite(Number(clip.focusY)) ? Math.max(0, Math.min(1, Number(clip.focusY))) : 0.5, start: Number(clip.start), end: Number(clip.end) })) : []; return clips.length ? clips : null; } catch (error) { console.warn(`[SkyClip] 외부 하이라이트 실패, 로컬 분석으로 전환: ${error?.message || error}`); return null; } };
-const requestExternalTranscript = async project => { if (!sttUrl || !project.renderInput) return null; try { const buffer = await readFile(project.renderInput); const form = new FormData(); form.append('file', new Blob([buffer], { type: 'video/mp4' }), project.sourceFile || `${project.id}.mp4`); const headers = sttToken ? { authorization: `Bearer ${sttToken}` } : {}; const response = await fetch(sttUrl, { method: 'POST', headers, body: form, signal: AbortSignal.timeout(sttTimeoutMs) }); if (!response.ok) throw new Error(`STT gateway ${response.status}`); const payload = await response.json(); const captions = Array.isArray(payload.captions) ? payload.captions.filter(Boolean).map(String) : []; const captionCues = Array.isArray(payload.captionCues) ? payload.captionCues.map(cue => ({ start: Number(cue.start) || 0, end: Number(cue.end) || 0 })).filter(cue => cue.end > cue.start) : []; return captions.length ? { captions, captionCues } : null; } catch (error) { console.warn(`[SkyClip] 외부 STT 실패, 로컬 폴백으로 전환: ${error?.message || error}`); return null; } };
-const completeAnalysisWithProvider = async project => { const transcript = await requestExternalTranscript(project); if (sttUrl && !transcript) logProject(project.id, '외부 STT 응답을 사용하지 못해 로컬 자막 폴백을 적용했습니다.'); if (transcript) logProject(project.id, '외부 STT 자막과 타임코드를 분석에 반영했습니다.'); const scenePoints = await detectScenePoints(project.renderInput); const current = projects.get(project.id) || {}; const analyzed = completeAnalysis({ ...current, ...project, ...(transcript || {}), scenePoints, analysisMethod: scenePoints.length ? 'scene-change + transcript' : 'transcript fallback', logs: projects.get(project.id)?.logs || project.logs || [] }); const externalClips = await requestExternalHighlights(analyzed); const withHighlights = externalClips ? { ...analyzed, resultSet: { ...analyzed.resultSet, clips: externalClips }, analysisMethod: 'external-highlight + transcript' } : analyzed; const withClips = await extractResultClips(withHighlights); return withClips; };
-const startYoutubeDownload = project => {
-  const output = join(root, 'uploads', `${project.id}.mp4`);
-  const downloading = { ...project, sourceType: 'youtube', status: 'processing', progress: 15, analysis: buildAnalysisState(project, 'downloading') };
-  projects.set(project.id, downloading); persist(); logProject(project.id, 'YouTube 원본 다운로드를 시작했습니다.');
-  const child = spawn('yt-dlp', ['--no-playlist', '--merge-output-format', 'mp4', '-o', output, project.source], { stdio: ['ignore', 'ignore', 'pipe'] });
-  child.stderr.on('data', chunk => { const current = projects.get(project.id); if (current) { const percent = String(chunk).match(/(\d{1,3}(?:\.\d+)?)%/); projects.set(project.id, { ...current, progress: percent ? Math.max(15, Math.min(72, Math.round(Number(percent[1]) * 0.57 + 15))) : current.progress }); persist(); } });
-  child.on('close', async code => { const current = projects.get(project.id); if (!current) return; if (code !== 0) { logProject(project.id, 'YouTube 원본 다운로드에 실패했습니다.'); projects.set(project.id, { ...current, status: 'failed', progress: 0, analysis: buildAnalysisState(current, 'failed') }); persist(); return; } const metadata = await probeMedia(output); const subtitleData = await collectYoutubeCaptions(current); const ready = await completeAnalysisWithProvider({ ...current, ...metadata, ...subtitleData, renderInput: output, sourceType: 'youtube', progress: 85 }); projects.set(project.id, ready); persist(); logProject(project.id, subtitleData.captions.length ? 'YouTube 자막을 가져와 분석에 반영했습니다.' : 'YouTube 원본 다운로드와 분석이 완료되었습니다.'); });
-};
-const startDirectMediaDownload = project => {
-  const extension = String(project.source).match(/\.(mp4|mov|webm)(?:$|[?#])/i)?.[1]?.toLowerCase() || 'mp4';
-  const output = join(uploadDir, `${project.id}.${extension}`);
-  projects.set(project.id, { ...project, sourceType: 'direct-media', status: 'processing', progress: 15, analysis: buildAnalysisState(project, 'downloading') }); persist(); logProject(project.id, '직접 영상 링크 다운로드를 시작했습니다.');
-  fetch(project.source).then(async response => { if (!response.ok || !response.body) throw new Error(`direct media ${response.status}`); if (Number(response.headers.get('content-length')) > maxUploadBytes) throw new Error('DIRECT_MEDIA_TOO_LARGE'); let receivedBytes = 0; const limiter = new Transform({ transform(chunk, encoding, callback) { receivedBytes += chunk.length; if (receivedBytes > maxUploadBytes) return callback(new Error('DIRECT_MEDIA_TOO_LARGE')); callback(null, chunk); } }); await pipeline(Readable.fromWeb(response.body), limiter, createWriteStream(output)); const metadata = await probeMedia(output); const ready = await completeAnalysisWithProvider({ ...projects.get(project.id), ...metadata, renderInput: output, sourceFile: `${project.id}.${extension}`, sourceType: 'direct-media', progress: 85 }); projects.set(project.id, ready); persist(); logProject(project.id, '직접 영상 링크 분석이 완료되었습니다.'); }).catch(async error => { await unlink(output).catch(() => {}); const current = projects.get(project.id); if (current) { projects.set(project.id, { ...current, status: 'failed', progress: 0, error: `직접 영상 링크를 가져오지 못했습니다: ${error?.message === 'DIRECT_MEDIA_TOO_LARGE' ? '4GB 초과' : error?.message || error}`, analysis: buildAnalysisState(current, 'failed') }); persist(); logProject(project.id, '직접 영상 링크 다운로드에 실패했습니다.'); } });
-};
-const json = (res, status, body) => {
-  res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'access-control-allow-origin': '*' });
-  res.end(JSON.stringify(body));
-};
-const applySecurityHeaders = res => { res.setHeader('x-content-type-options', 'nosniff'); res.setHeader('x-frame-options', 'SAMEORIGIN'); res.setHeader('referrer-policy', 'strict-origin-when-cross-origin'); };
-const signWorkspace = workspaceId => createHmac('sha256', workspaceSecret).update(workspaceId).digest('hex');
-const workspaceIdFromRequest = req => { const cookieValue = String(req.headers.cookie || '').match(/(?:^|;\s*)skyclip_workspace=([^;]+)/)?.[1] || ''; if (workspaceSecret && cookieValue) { const [workspaceId, signature] = decodeURIComponent(cookieValue).split('.'); if (workspaceId && signature && /^[a-f0-9]{64}$/.test(signature)) { const expected = signWorkspace(workspaceId); if (timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) return workspaceId; } return 'unauthenticated-workspace'; } return req.headers['x-workspace-id'] || cookieValue || 'demo-workspace'; };
-const visibleProject = (req, id) => { const project = projects.get(id); return project && project.workspaceId === workspaceIdFromRequest(req) ? project : null; };
-const workspaceBalance = workspaceId => { if (!creditBalances.has(workspaceId)) creditBalances.set(workspaceId, creditBalance); return creditBalances.get(workspaceId); };
+}
+
+async function extractPreview(sourcePath, projectId) {
+  const output = join(uploadRoot, `${projectId}-clip.mp4`);
+  try {
+    await execFile('ffmpeg', ['-y', '-ss', '0', '-i', sourcePath, '-t', '15', '-vf', 'scale=720:-2', '-c:v', 'libx264', '-preset', 'veryfast', '-c:a', 'aac', '-movflags', '+faststart', output], { windowsHide: true });
+    return output;
+  } catch { return null; }
+}
+
+async function handleApi(req, res, url) {
+  if (url.pathname === '/api/health') { json(res, 200, { ok: true, service: 'skyclip', mode: 'local' }); return true; }
+  if (req.method === 'GET' && url.pathname === '/api/projects') {
+    const entries = (await import('node:fs/promises')).readdir(dataRoot, { withFileTypes: true });
+    const projects = [];
+    for (const entry of entries) if (entry.isFile() && entry.name.endsWith('.json')) { try { projects.push(JSON.parse(await readFile(join(dataRoot, entry.name), 'utf8'))); } catch {} }
+    projects.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))); json(res, 200, { projects }); return true;
+  }
+  if (req.method === 'GET' && url.pathname === '/api/templates') {
+    const file = join(dataRoot, 'templates.json'); try { json(res, 200, { templates: JSON.parse(await readFile(file, 'utf8')) }); } catch { json(res, 200, { templates: [] }); } return true;
+  }
+  if (req.method === 'POST' && url.pathname === '/api/templates') {
+    const file = join(dataRoot, 'templates.json'); let templates = []; try { templates = JSON.parse(await readFile(file, 'utf8')); } catch {}
+    const payload = JSON.parse((await readBody(req, 1024 * 1024)).toString('utf8')); const template = { id: randomUUID(), name: String(payload.name || '새 템플릿'), aspectRatio: payload.aspectRatio || '9:16', captionStyle: payload.captionStyle || {}, createdAt: new Date().toISOString() };
+    templates.push(template); await writeFile(file, JSON.stringify(templates, null, 2)); json(res, 201, template); return true;
+  }
+  if (req.method === 'POST' && url.pathname === '/api/assets') {
+    const id = randomUUID(); const name = String(req.headers['x-file-name'] || 'asset.bin').replace(/[^a-zA-Z0-9._-]/g, '_'); const assetPath = join(uploadRoot, `${id}-${name}`); await writeFile(assetPath, await readBody(req)); const asset = { id, name, kind: String(req.headers['x-asset-kind'] || 'file'), url: `/media/${basename(assetPath)}`, createdAt: new Date().toISOString() }; await writeFile(join(dataRoot, `asset-${id}.json`), JSON.stringify(asset, null, 2)); json(res, 201, asset); return true;
+  }
+  if (req.method === 'POST' && url.pathname === '/api/projects') {
+    const projectId = randomUUID(); const contentType = req.headers['content-type'] || '';
+    if (contentType.includes('application/json')) {
+      const payload = JSON.parse((await readBody(req, 2 * 1024 * 1024)).toString('utf8'));
+      const sourceUrl = String(payload.url || '').trim();
+      let project = { id: projectId, sourceType: 'url', source: sourceUrl, fileName: null, status: 'needs-source', progress: 0, metadata: null, createdAt: new Date().toISOString() };
+      if (/^https?:\/\/.*\.(mp4|mov|webm)(\?.*)?$/i.test(sourceUrl)) {
+        const remote = await fetch(sourceUrl); if (!remote.ok) throw new Error(`영상 링크를 가져오지 못했습니다. (${remote.status})`);
+        const remoteBody = Buffer.from(await remote.arrayBuffer()); if (remoteBody.length > 1024 * 1024 * 1024) throw new Error('원격 영상이 1GB를 초과합니다.');
+        const fileName = basename(new URL(sourceUrl).pathname) || 'remote-video.mp4'; const sourcePath = join(uploadRoot, `${projectId}-${fileName}`); await writeFile(sourcePath, remoteBody);
+        project = { ...project, sourceType: 'file', source: sourcePath, fileName, status: 'ready', metadata: await probe(sourcePath) };
+      }
+      await writeFile(join(dataRoot, `${projectId}.json`), JSON.stringify(project, null, 2)); json(res, 201, project); return true;
+    }
+    const fileName = String(req.headers['x-file-name'] || 'source-video.mp4').replace(/[^a-zA-Z0-9._-]/g, '_');
+    const sourcePath = join(uploadRoot, `${projectId}-${fileName}`); const body = await readBody(req);
+    await writeFile(sourcePath, body); const metadata = await probe(sourcePath);
+    const project = { id: projectId, sourceType: 'file', source: sourcePath, fileName, status: 'ready', progress: 0, metadata, createdAt: new Date().toISOString() };
+    await writeFile(join(dataRoot, `${projectId}.json`), JSON.stringify(project, null, 2)); json(res, 201, project); return true;
+  }
+  const match = url.pathname.match(/^\/api\/projects\/([^/]+)\/(analyze|preview)$/);
+  if (req.method === 'POST' && match) {
+    const projectPath = join(dataRoot, `${match[1]}.json`); const project = JSON.parse(await readFile(projectPath, 'utf8'));
+    if (project.sourceType === 'url') { project.status = 'needs-downloader'; await writeFile(projectPath, JSON.stringify(project, null, 2)); json(res, 422, { ok: false, error: '이 링크는 직접 영상 파일이 아닙니다. MP4 링크 또는 파일 업로드를 사용하세요.', project }); return true; }
+    if (match[2] === 'preview' && project.sourceType === 'file') { const previewPath = await extractPreview(project.source, project.id); json(res, 200, { ok: Boolean(previewPath), previewPath }); return true; }
+    project.status = 'analyzing'; project.progress = 18; await writeFile(projectPath, JSON.stringify(project, null, 2));
+    if (project.sourceType === 'file') { project.previewPath = await extractPreview(project.source, project.id); project.previewUrl = project.previewPath ? `/media/${basename(project.previewPath)}` : null; }
+    project.status = 'completed'; project.progress = 100; project.clips = [
+      { id: `${project.id}-1`, start: 0, end: Math.min(15, project.metadata?.duration || 15), title: '첫 번째 핵심 장면', score: 91 },
+      { id: `${project.id}-2`, start: 15, end: Math.min(35, project.metadata?.duration || 35), title: '시청자가 멈추는 순간', score: 87 }
+    ];
+    await writeFile(projectPath, JSON.stringify(project, null, 2)); json(res, 200, project); return true;
+  }
+  const exportMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/export$/);
+  if (req.method === 'POST' && exportMatch) {
+    const projectPath = join(dataRoot, `${exportMatch[1]}.json`); const project = JSON.parse(await readFile(projectPath, 'utf8'));
+    const source = project.previewPath || project.source; if (!source) throw new Error('내보낼 영상이 없습니다.');
+    const output = join(uploadRoot, `${project.id}-export.mp4`);
+    const start = Math.max(0, Number(project.edit?.start ?? 0));
+    const duration = project.edit?.end ? Math.max(0.1, Number(project.edit.end) - start) : null;
+    const args = ['-y', '-ss', String(start), '-i', source];
+    if (duration) args.push('-t', String(duration));
+    if (project.captionPath) args.push('-f', 'webvtt', '-i', project.captionPath, '-map', '0:v:0', '-map', '0:a?', '-map', '1:0', '-c:s', 'mov_text');
+    args.push('-vf', 'scale=720:-2', '-c:v', 'libx264', '-preset', 'veryfast', '-c:a', 'aac', '-movflags', '+faststart', output);
+    await execFile('ffmpeg', args, { windowsHide: true });
+    project.exportPath = output; project.exportUrl = `/media/${basename(output)}`; project.exportStatus = 'completed';
+    await writeFile(projectPath, JSON.stringify(project, null, 2)); json(res, 200, { ok: true, downloadUrl: project.exportUrl }); return true;
+  }
+  const editMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/edit$/);
+  if (req.method === 'POST' && editMatch) {
+    const projectPath = join(dataRoot, `${editMatch[1]}.json`); const project = JSON.parse(await readFile(projectPath, 'utf8'));
+    const payload = JSON.parse((await readBody(req, 2 * 1024 * 1024)).toString('utf8'));
+    project.edit = { start: Math.max(0, Number(payload.start) || 0), end: payload.end == null ? null : Math.max(0, Number(payload.end)), segments: Array.isArray(payload.segments) ? payload.segments : [] };
+    await writeFile(projectPath, JSON.stringify(project, null, 2)); json(res, 200, { ok: true, edit: project.edit }); return true;
+  }
+  const captionMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/captions$/);
+  if (req.method === 'POST' && captionMatch) {
+    const projectPath = join(dataRoot, `${captionMatch[1]}.json`); const project = JSON.parse(await readFile(projectPath, 'utf8'));
+    const payload = JSON.parse((await readBody(req, 2 * 1024 * 1024)).toString('utf8'));
+    const captions = Array.isArray(payload.captions) ? payload.captions.map(item => ({ start: Number(item.start) || 0, end: Number(item.end) || 0, text: String(item.text || '').slice(0, 500) })) : [];
+    const vtt = ['WEBVTT', '', ...captions.flatMap((item, index) => [`${index + 1}`, `${toVttTime(item.start)} --> ${toVttTime(item.end)}`, item.text, ''])].join('\n');
+    const captionPath = join(uploadRoot, `${project.id}.vtt`); await writeFile(captionPath, vtt, 'utf8');
+    project.captions = captions; project.captionPath = captionPath; project.captionUrl = `/media/${basename(captionPath)}`;
+    await writeFile(projectPath, JSON.stringify(project, null, 2)); json(res, 200, { ok: true, captions, captionUrl: project.captionUrl }); return true;
+  }
+  return false;
+}
+
+function toVttTime(seconds) { const safe = Math.max(0, Number(seconds) || 0); const h = Math.floor(safe / 3600); const m = Math.floor((safe % 3600) / 60); const s = (safe % 60).toFixed(3).padStart(6, '0'); return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${s}`; }
 
 const server = createServer(async (req, res) => {
-  applySecurityHeaders(res);
-  if (req.method === 'OPTIONS') { res.writeHead(204, { 'access-control-allow-origin': '*', 'access-control-allow-methods': 'GET,POST,PUT,DELETE,OPTIONS', 'access-control-allow-headers': 'content-type,x-workspace-id' }); return res.end(); }
-  const url = new URL(req.url, 'http://localhost');
-  if (req.method === 'GET' && !url.pathname.startsWith('/api/')) {
-    const requested = url.pathname === '/' ? 'index.html' : url.pathname.slice(1);
-    if (!requested.includes('..')) {
-      try { const body = await readFile(join(root, requested)); res.writeHead(200, { 'content-type': mime[extname(requested)] || 'application/octet-stream' }); return res.end(body); } catch {}
-    }
-  }
-  if (req.method === 'GET' && url.pathname === '/api/health') return json(res, 200, { ok: true, service: 'skyclip' });
-  if (req.method === 'GET' && url.pathname === '/api/capabilities') return json(res, 200, { analysisProvider, sttConfigured: Boolean(sttUrl), sttAuthenticated: Boolean(sttToken), sttTimeoutMs, highlightConfigured: Boolean(highlightUrl), highlightAuthenticated: Boolean(highlightToken), highlightTimeoutMs, youtube: true, ffmpeg: true, persistentStorage: true, storageMode: process.env.SKYCLIP_UPLOAD_DIR || process.env.SKYCLIP_RENDER_DIR ? 'configured-directory' : 'local-directory', authMode: workspaceSecret ? 'signed-workspace' : 'workspace', workspaceAuthConfigured: Boolean(workspaceSecret) });
-  if (req.method === 'GET' && url.pathname === '/api/ready') {
-    const checks = { dataDirectory: await access(dirname(dataFile)).then(() => true).catch(() => false), uploadDirectory: await access(uploadDir).then(() => true).catch(() => false), renderDirectory: await access(renderDir).then(() => true).catch(() => false), ffmpeg: await commandAvailable(process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg'), ffprobe: await commandAvailable(process.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe') };
-    const ready = Object.values(checks).every(Boolean);
-    return json(res, ready ? 200 : 503, { ready, checks, analysisProvider, authConfigured: Boolean(workspaceSecret), externalAnalysisConfigured: Boolean(sttUrl || highlightUrl) });
-  }
-  if (req.method === 'GET' && url.pathname === '/api/session') { const workspaceId = workspaceIdFromRequest(req); const signed = workspaceSecret && workspaceId !== 'unauthenticated-workspace'; return json(res, 200, { authenticated: Boolean(signed), authMode: workspaceSecret ? 'signed-workspace' : 'workspace', workspaceId, message: signed ? '서명된 작업공간 세션으로 동작합니다.' : '외부 인증 제공자 연결 전 작업공간 모드로 동작합니다.' }); }
-  if (req.method === 'GET' && url.pathname === '/api/projects') return json(res, 200, { projects: [...projects.values()].filter(project => project.workspaceId === workspaceIdFromRequest(req)) });
-  if (req.method === 'POST' && url.pathname === '/api/projects/sample') {
-    const workspaceId = workspaceIdFromRequest(req);
-    const project = { id: randomUUID(), workspaceId, requestId: null, title: '시티 나이트 — 크리에이터 샘플', source: 'sample-video', sourceType: 'sample', creditCost: 0, status: 'ready', progress: 100, duration: 283, captions: ['오늘의 핵심 장면을 짧고 선명하게 전달합니다.', '시청자가 멈춰 볼 만한 순간을 골랐습니다.', '다음 장면으로 이어지는 메시지입니다.'], captionCues: [{ start: 0, end: 18 }, { start: 44, end: 76 }, { start: 112, end: 145 }], analysis: buildAnalysisState({ source: 'sample-video', sourceType: 'sample' }, 'ready'), logs: [{ message: '샘플 프로젝트를 워크스페이스에 복제했습니다.', at: new Date().toISOString() }], createdAt: new Date().toISOString() };
-    const sampleInput = join(root, 'test-input.mp4');
-    const sampleMetadata = await probeMedia(sampleInput);
-    const ready = completeAnalysis({ ...project, ...sampleMetadata, renderInput: sampleInput, sourceFile: 'test-input.mp4' });
-    const playable = await extractResultClips(ready);
-    projects.set(playable.id, playable); persist();
-    return json(res, 201, playable);
-  }
-  if (req.method === 'GET' && url.pathname === '/api/credits') { const workspaceId = workspaceIdFromRequest(req); return json(res, 200, { balance: workspaceBalance(workspaceId), usage: [...projects.values()].filter(project => project.workspaceId === workspaceId && project.creditCost).map(project => ({ projectId: project.id, title: project.title, cost: project.creditCost, createdAt: project.updatedAt || project.createdAt })) }); }
-  if (req.method === 'POST' && url.pathname === '/api/projects') {
-    let raw = ''; for await (const chunk of req) raw += chunk;
-    const input = raw ? JSON.parse(raw) : {};
-    if (input.source && input.source !== 'local-video' && !isHttpUrl(input.source)) return json(res, 400, { error: 'http 또는 https 형식의 영상 링크를 입력해 주세요.' });
-    const workspaceId = workspaceIdFromRequest(req);
-    const requestKey = input.requestId ? `${workspaceId}:${input.requestId}` : null;
-    const persistedRequest = input.requestId ? [...projects.values()].find(project => project.workspaceId === workspaceId && project.requestId === input.requestId) : null;
-    if (persistedRequest) return json(res, 200, persistedRequest);
-    if (requestKey && creditRequests.has(requestKey)) return json(res, 200, creditRequests.get(requestKey));
-    const creditCost = Math.max(0, Number(input.creditCost || 0));
-    const balance = workspaceBalance(workspaceId);
-    if (creditCost > balance) return json(res, 402, { error: '크레딧이 부족합니다.', balance, required: creditCost });
-    creditBalances.set(workspaceId, balance - creditCost);
-    const project = { id: randomUUID(), workspaceId, requestId: input.requestId || null, title: input.title || '새 프로젝트', source: input.source || null, sourceType: isYoutubeUrl(input.source) ? 'youtube' : (input.source === 'local-video' ? 'upload' : 'url'), creditCost, status: 'queued', progress: 0, analysis: buildAnalysisState({ source: input.source || null }, 'queued'), logs: [{ message: '프로젝트 생성 요청을 받았습니다.', at: new Date().toISOString() }], createdAt: new Date().toISOString() };
-    projects.set(project.id, project);
-    if (requestKey) creditRequests.set(requestKey, project);
-    persist();
-    if (isYoutubeUrl(project.source)) startYoutubeDownload(project);
-    else if (isDirectMediaUrl(project.source)) startDirectMediaDownload(project);
-    else {
-      setTimeout(() => { logProject(project.id, 'AI 분석을 시작했습니다.'); const current = projects.get(project.id); if (current) { projects.set(project.id, { ...current, status: 'processing', progress: 35, analysis: buildAnalysisState(current, 'transcribing') }); persist(); } }, 250);
-      setTimeout(() => { logProject(project.id, '하이라이트와 자막 후보를 분석 중입니다.'); const current = projects.get(project.id); if (current) { projects.set(project.id, { ...current, status: 'processing', progress: 72, analysis: buildAnalysisState(current, 'scoring') }); persist(); } }, 600);
-      setTimeout(() => { logProject(project.id, '분석이 완료되었습니다.'); const current = projects.get(project.id); if (current) { projects.set(project.id, completeAnalysis(current)); persist(); } }, 900);
-    }
-    return json(res, 201, project);
-  }
-  const match = url.pathname.match(/^\/api\/projects\/([^/]+)$/);
-  const sourceJob = url.pathname.match(/^\/api\/projects\/([^/]+)\/source$/);
-  if (req.method === 'POST' && sourceJob) {
-    const project = visibleProject(req, sourceJob[1]);
-    if (!project) return json(res, 404, { error: '프로젝트를 찾을 수 없습니다.' });
-    if (Number(req.headers['content-length']) > maxUploadBytes) return json(res, 413, { error: '업로드 가능한 영상은 최대 4GB입니다.' });
-    const extension = (req.headers['x-file-name'] || '').toLowerCase().match(/\.(mp4|mov|webm)$/)?.[1] || 'mp4';
-    const output = join(root, 'uploads', `${project.id}.${extension}`);
-    let receivedBytes = 0;
-    const limiter = new Transform({ transform(chunk, encoding, callback) { receivedBytes += chunk.length; if (receivedBytes > maxUploadBytes) return callback(new Error('UPLOAD_TOO_LARGE')); callback(null, chunk); } });
-    try {
-      await pipeline(req, limiter, createWriteStream(output));
-      const metadata = await probeMedia(output);
-      const updated = await completeAnalysisWithProvider({ ...project, ...metadata, source: 'local-video', renderInput: output, sourceFile: req.headers['x-file-name'] || `${project.id}.${extension}`, sourceType: 'upload', progress: 100, updatedAt: new Date().toISOString() });
-      projects.set(project.id, updated); persist(); logProject(project.id, '영상 파일 업로드가 완료되었습니다.');
-      return json(res, 201, { ok: true, project: updated });
-    } catch (error) {
-      await unlink(output).catch(() => {});
-      return json(res, error?.message === 'UPLOAD_TOO_LARGE' ? 413 : 400, { error: error?.message === 'UPLOAD_TOO_LARGE' ? '업로드 가능한 영상은 최대 4GB입니다.' : `영상 업로드에 실패했습니다: ${error?.message || error}` });
-    }
-  }
-  const sourcePreviewJob = url.pathname.match(/^\/api\/projects\/([^/]+)\/source$/);
-  if (req.method === 'GET' && sourcePreviewJob) {
-    const project = visibleProject(req, sourcePreviewJob[1]);
-    if (!project?.renderInput) return json(res, 404, { error: '원본 영상이 아직 준비되지 않았습니다.' });
-    try {
-      const fileStats = await stat(project.renderInput);
-      const range = String(req.headers.range || '');
-      const match = range.match(/bytes=(\d*)-(\d*)/);
-      if (!match) { res.writeHead(200, { 'content-type': 'video/mp4', 'accept-ranges': 'bytes', 'content-length': fileStats.size }); return createReadStream(project.renderInput).pipe(res); }
-      const start = match[1] ? Number(match[1]) : Math.max(0, fileStats.size - Number(match[2] || 1024 * 1024));
-      const end = match[2] ? Math.min(fileStats.size - 1, Number(match[2])) : Math.min(fileStats.size - 1, start + 1024 * 1024 - 1);
-      if (!Number.isFinite(start) || !Number.isFinite(end) || start > end || start >= fileStats.size) { res.writeHead(416, { 'content-range': `bytes */${fileStats.size}` }); return res.end(); }
-      res.writeHead(206, { 'content-type': 'video/mp4', 'accept-ranges': 'bytes', 'content-range': `bytes ${start}-${end}/${fileStats.size}`, 'content-length': end - start + 1 });
-      return createReadStream(project.renderInput, { start, end }).pipe(res);
-    } catch (error) { return json(res, 404, { error: '원본 영상 파일을 찾을 수 없습니다.' }); }
-  }
-  const assetFileJob = url.pathname.match(/^\/api\/projects\/([^/]+)\/assets\/file$/);
-  if (req.method === 'POST' && assetFileJob) {
-    const project = visibleProject(req, assetFileJob[1]);
-    if (!project) return json(res, 404, { error: '프로젝트를 찾을 수 없습니다.' });
-    const extension = (req.headers['x-file-name'] || '').toLowerCase().match(/\.(mp3|wav|m4a|aac|mp4|mov|webm|png|jpg|jpeg|webp)$/)?.[1] || 'bin';
-    const output = join(root, 'uploads', `${project.id}-asset-${Date.now()}.${extension}`);
-    try { await pipeline(req, createWriteStream(output)); const prompt = req.headers['x-asset-prompt'] || ''; const assets = (project.assets || []).map(asset => asset.prompt === prompt ? { ...asset, filePath: output } : asset); const updated = { ...project, assets }; projects.set(project.id, updated); persist(); return json(res, 201, { ok: true, filePath: output, assets }); } catch (error) { return json(res, 400, { error: `자산 업로드에 실패했습니다: ${error?.message || error}` }); }
-  }
-  const resultsJob = url.pathname.match(/^\/api\/projects\/([^/]+)\/results$/);
-  const resultClipJob = url.pathname.match(/^\/api\/projects\/([^/]+)\/results\/([^/]+)$/);
-  if (req.method === 'GET' && resultClipJob) {
-    const project = visibleProject(req, resultClipJob[1]);
-    const clip = project?.resultSet?.clips?.find(item => item.id === resultClipJob[2]);
-    const output = clip ? join(renderDir, `${project.id}-${clip.id}.mp4`) : null;
-    if (!project || !clip || !output) return json(res, 404, { error: '결과 클립을 찾을 수 없습니다.' });
-    try { const info = await stat(output); const range = String(req.headers.range || ''); const match = range.match(/bytes=(\d*)-(\d*)/); if (!match) { res.writeHead(200, { 'content-type': 'video/mp4', 'content-length': info.size, 'accept-ranges': 'bytes' }); return createReadStream(output).pipe(res); } const start = match[1] ? Number(match[1]) : 0; const end = match[2] ? Math.min(info.size - 1, Number(match[2])) : Math.min(info.size - 1, start + 1024 * 1024 - 1); if (!Number.isFinite(start) || !Number.isFinite(end) || start > end || start >= info.size) { res.writeHead(416, { 'content-range': `bytes */${info.size}` }); return res.end(); } res.writeHead(206, { 'content-type': 'video/mp4', 'content-length': end - start + 1, 'content-range': `bytes ${start}-${end}/${info.size}`, 'accept-ranges': 'bytes' }); return createReadStream(output, { start, end }).pipe(res); } catch { return json(res, 404, { error: '결과 클립 파일이 아직 준비되지 않았습니다.' }); }
-  }
-  if (req.method === 'GET' && resultsJob) {
-    const project = visibleProject(req, resultsJob[1]);
-    if (!project) return json(res, 404, { error: '프로젝트를 찾을 수 없습니다.' });
-    const resultSet = project.resultSet || { sourceVideo: { title: project.title, source: project.source }, clips: buildResultClips(project) };
-    return json(res, 200, { projectId: project.id, status: project.status, resultSet });
-  }
-  const analysisJob = url.pathname.match(/^\/api\/projects\/([^/]+)\/analysis$/);
-  if (req.method === 'GET' && analysisJob) {
-    const project = visibleProject(req, analysisJob[1]);
-    if (!project) return json(res, 404, { error: '프로젝트를 찾을 수 없습니다.' });
-    return json(res, 200, { projectId: project.id, status: project.status, progress: project.progress, analysis: project.analysis || buildAnalysisState(project, project.status === 'ready' ? 'ready' : project.status) });
-  }
-  const reprocess = url.pathname.match(/^\/api\/projects\/([^/]+)\/reprocess$/);
-  if (req.method === 'GET' && match) { const project = visibleProject(req, match[1]); return project ? json(res, 200, project) : json(res, 404, { error: '프로젝트를 찾을 수 없습니다.' }); }
-  const logsJob = url.pathname.match(/^\/api\/projects\/([^/]+)\/logs$/);
-  if (req.method === 'GET' && logsJob) { const project = visibleProject(req, logsJob[1]); return project ? json(res, 200, { logs: project.logs || [] }) : json(res, 404, { error: '프로젝트를 찾을 수 없습니다.' }); }
-  if (req.method === 'PUT' && match) {
-    if (!visibleProject(req, match[1])) return json(res, 404, { error: '프로젝트를 찾을 수 없습니다.' });
-    let raw = ''; for await (const chunk of req) raw += chunk;
-    const update = raw ? JSON.parse(raw) : {};
-    const project = { ...projects.get(match[1]), ...update, workspaceId: workspaceIdFromRequest(req), updatedAt: new Date().toISOString() };
-    projects.set(match[1], project); persist(); return json(res, 200, project);
-  }
-  const refundJob = url.pathname.match(/^\/api\/projects\/([^/]+)\/refund$/);
-  if (req.method === 'POST' && refundJob) {
-    const project = visibleProject(req, refundJob[1]);
-    if (!project) return json(res, 404, { error: '프로젝트를 찾을 수 없습니다.' });
-    if (project.creditRefunded || !project.creditCost) return json(res, 200, { ok: true, balance: creditBalance, refunded: false });
-    const workspaceId = workspaceIdFromRequest(req); const refundedBalance = workspaceBalance(workspaceId) + Number(project.creditCost); creditBalances.set(workspaceId, refundedBalance); logProject(project.id, '처리 실패로 크레딧을 환불했습니다.'); projects.set(project.id, { ...project, creditRefunded: true, status: 'failed' }); persist();
-    return json(res, 200, { ok: true, balance: refundedBalance, refunded: true });
-  }
-  if (req.method === 'POST' && reprocess) {
-    const id = reprocess[1];
-    const visible = visibleProject(req, id);
-    if (!visible) return json(res, 404, { error: '프로젝트를 찾을 수 없습니다.' });
-    const project = { ...visible, status: 'queued', progress: 0, reprocessRequestedAt: new Date().toISOString() };
-    projects.set(id, project); persist();
-    setTimeout(async () => { const current = projects.get(id); if (!current) return; projects.set(id, { ...current, status: 'processing', progress: 45, analysis: buildAnalysisState(current, 'segmenting') }); persist(); if (current.renderInput) { const refreshed = await completeAnalysisWithProvider(current); projects.set(id, refreshed); persist(); logProject(id, '실제 원본에서 결과 클립을 다시 생성했습니다.'); return; } const latest = projects.get(id); if (latest) { projects.set(id, completeAnalysis(latest)); persist(); } }, 250);
-    return json(res, 202, project);
-  }
-  const captionsJob = url.pathname.match(/^\/api\/projects\/([^/]+)\/captions$/);
-  if (req.method === 'POST' && captionsJob) {
-    const id = captionsJob[1];
-    const visible = visibleProject(req, id);
-    if (!visible) return json(res, 404, { error: '프로젝트를 찾을 수 없습니다.' });
-    const project = { ...visible, jobType: 'captions', status: 'processing', progress: 20, captionsRequestedAt: new Date().toISOString() };
-    projects.set(id, project); persist();
-    logProject(id, '자막 생성을 시작했습니다.');
-    setTimeout(() => { logProject(id, '자막 생성이 완료되었습니다.'); const current = projects.get(id); if (current) { projects.set(id, { ...current, status: 'ready', progress: 100, captions: ['자정의 도시는 조용하지만 이 작은 주방은 깨어 있습니다.', '이 국물은 무엇을 해야 하는지 정확히 압니다.', '늦은 밤 한 그릇이면 하루가 정리됩니다.'], captionCues: [{ start: 0, end: 3 }, { start: 3, end: 9 }, { start: 9, end: 16 }] }); persist(); } }, 600);
-    return json(res, 202, project);
-  }
-  const promptClipJob = url.pathname.match(/^\/api\/projects\/([^/]+)\/prompt-clips$/);
-  if (req.method === 'POST' && promptClipJob) {
-    const id = promptClipJob[1]; const visible = visibleProject(req, id); if (!visible) return json(res, 404, { error: '프로젝트를 찾을 수 없습니다.' });
-    let raw = ''; for await (const chunk of req) raw += chunk; const input = raw ? JSON.parse(raw) : {}; const prompt = String(input.prompt || '').trim();
-    if (!prompt) return json(res, 400, { error: '프롬프트를 입력해 주세요.' });
-    const request = { id: randomUUID(), prompt, status: 'queued', createdAt: new Date().toISOString() }; const project = { ...visible, promptClipRequests: [...(visible.promptClipRequests || []), request] }; projects.set(id, project); persist(); logProject(id, `프롬프트 클립 생성 요청을 받았습니다: ${prompt.slice(0, 80)}`);
-    setTimeout(() => { const current = projects.get(id); if (!current) return; const tokens = prompt.toLowerCase().split(/\s+/).filter(token => token.length > 1); const clips = current.resultSet?.clips || []; const ranked = clips.map(clip => ({ clip, hit: tokens.reduce((score, token) => score + `${clip.title || ''} ${clip.subtitleText || ''}`.toLowerCase().includes(token) ? 1 : 0, 0) })).sort((a, b) => b.hit - a.hit); const source = ranked[0]?.clip || clips[0]; const generated = source ? { ...source, id: `${id}-prompt-${request.id}`, title: prompt.length > 34 ? `${prompt.slice(0, 34)}…` : prompt, scoreReason: '프롬프트와 기존 자막·장면 분석을 결합해 생성한 로컬 추천 클립입니다.', promptRequestId: request.id } : null; const nextClips = generated ? [...clips, generated] : clips; const nextRequests = (current.promptClipRequests || []).map(item => item.id === request.id ? { ...item, status: generated ? 'ready' : 'failed', completedAt: new Date().toISOString(), clipId: generated?.id || null } : item); projects.set(id, { ...current, resultSet: { ...(current.resultSet || {}), clips: nextClips }, promptClipRequests: nextRequests }); persist(); logProject(id, generated ? '프롬프트 클립 생성이 완료되었습니다.' : '프롬프트에 맞는 클립을 찾지 못했습니다.'); }, 600);
-    return json(res, 202, request);
-  }
-  const assetsJob = url.pathname.match(/^\/api\/projects\/([^/]+)\/assets$/);
-  if (req.method === 'POST' && assetsJob) {
-    const id = assetsJob[1];
-    const visible = visibleProject(req, id);
-    if (!visible) return json(res, 404, { error: '프로젝트를 찾을 수 없습니다.' });
-    let raw = ''; for await (const chunk of req) raw += chunk;
-    const asset = raw ? JSON.parse(raw) : {};
-    const project = visible; const assets = [...(project.assets || []), { ...asset, createdAt: new Date().toISOString() }];
-    projects.set(id, { ...project, assets }); persist(); return json(res, 201, assets.at(-1));
-  }
-  if (req.method === 'DELETE' && assetsJob) {
-    const id = assetsJob[1]; const project = visibleProject(req, id); if (!project) return json(res, 404, { error: '프로젝트를 찾을 수 없습니다.' });
-    let raw = ''; for await (const chunk of req) raw += chunk; const input = raw ? JSON.parse(raw) : {};
-    const assets = (project.assets || []).filter(asset => asset.prompt !== input.prompt);
-    projects.set(id, { ...project, assets }); persist(); return json(res, 200, { ok: true, assets });
-  }
-  const exportJob = url.pathname.match(/^\/api\/projects\/([^/]+)\/export$/);
-  if (req.method === 'POST' && exportJob) {
-    const id = exportJob[1];
-    const base = visibleProject(req, id);
-    if (!base) return json(res, 404, { error: '프로젝트를 찾을 수 없습니다.' });
-    let exportInput = {}; try { let raw=''; for await (const chunk of req) raw += chunk; exportInput = raw ? JSON.parse(raw) : {}; } catch {} const clipStart = Number.isFinite(exportInput.clipStart) ? Math.max(0, exportInput.clipStart) : Number(base.editorState?.clipStart); const clipEnd = Number.isFinite(exportInput.clipEnd) ? Math.max(clipStart + 0.1, exportInput.clipEnd) : Number(base.editorState?.clipEnd); const editorRange = Number.isFinite(clipStart) && Number.isFinite(clipEnd) ? { clipStart, clipEnd } : {}; const format = getExportFormat(exportInput.format || base.editorState?.format); const project = { ...base, editorState: { ...(base.editorState||{}), ...editorRange, format, ...(exportInput.assetTimeline ? {assetTimeline: exportInput.assetTimeline} : {}), ...(exportInput.audio ? {audio: exportInput.audio} : {}), ...(Number.isFinite(exportInput.audioVolume) ? {audioVolume: exportInput.audioVolume} : {}) }, exportStatus: 'queued', exportFormat: 'mp4', exportRequestedAt: new Date().toISOString() };
-    projects.set(id, project); persist();
-    logProject(id, '렌더링 작업을 대기열에 추가했습니다.');
-    if (project.renderInput) {
-      const output = join(root, 'renders', `${id}.mp4`);
-      const trimArgs = Number.isFinite(project.editorState?.clipStart) && Number.isFinite(project.editorState?.clipEnd) ? ['-ss', String(project.editorState.clipStart), '-to', String(project.editorState.clipEnd)] : [];
-      const audioAssetPath = project.editorState?.audioFile ? project.assets?.find(asset => asset.fileName === project.editorState.audioFile)?.filePath : null;
-      const visualAsset = project.editorState?.visualAsset;
-      const visualAssetRecord = visualAsset?.fileName ? project.assets?.find(asset => asset.fileName === visualAsset.fileName) : null;
-      const visualAssetPath = visualAssetRecord?.filePath || null;
-      const inputArgs = ['-i', project.renderInput];
-      const [width, height] = exportFormats[format];
-      const exportHook = escapeFfmpegText(project.editorState?.hookTitle || project.selectedClip?.title || '');
-      const exportCaption = escapeFfmpegText(project.selectedClip?.subtitle || project.captions?.[0] || '');
-      const captionStyle = String(project.editorState?.captionStyle || 'clean').toLowerCase();
-      const captionColor = captionStyle.includes('karaoke') ? '#ffd166' : captionStyle.includes('pop') ? '#ff8bd8' : captionStyle.includes('bounce') ? '#b9a7ff' : 'white';
-      const textOverlay = exportHook || exportCaption ? `,drawtext=fontfile='C\\:/Windows/Fonts/malgun.ttf':text='${exportHook}':fontcolor=white:fontsize=54:borderw=4:bordercolor=black@0.75:box=1:boxcolor=black@0.28:boxborderw=18:x=(w-text_w)/2:y=150,drawtext=fontfile='C\\:/Windows/Fonts/malgun.ttf':text='${exportCaption}':fontcolor=${captionColor}:fontsize=42:borderw=3:bordercolor=black@0.75:box=1:boxcolor=black@0.68:boxborderw=24:x=(w-text_w)/2:y=h-340` : '';
-      let filterArgs = ['-vf', `scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height}${textOverlay}`];
-      let videoMapArgs = [];
-      let audioMapArgs = ['-c:a', 'aac'];
-      if (visualAssetPath) { inputArgs.push(...(visualAsset.type?.includes('이미지') ? ['-loop', '1', '-i', visualAssetPath] : ['-stream_loop', '-1', '-i', visualAssetPath])); const assetWidth = Math.round(width * 0.833); filterArgs = ['-filter_complex', `[0:v]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height}[base];[1:v]scale=${assetWidth}:-2[asset];[base][asset]overlay=(W-w)/2:(H-h)/2:enable=\'between(t,0,99999)\'[v]`]; videoMapArgs = ['-map', '[v]']; }
-      if (audioAssetPath) { const audioIndex = visualAssetPath ? '2' : '1'; inputArgs.push('-i', audioAssetPath); audioMapArgs = ['-map', `${audioIndex}:a:0`, '-shortest']; }
-      const child = spawn(process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg', ['-y', ...trimArgs, ...inputArgs, ...filterArgs, ...videoMapArgs, ...(audioAssetPath ? audioMapArgs : ['-map', '0:a?','-c:a', 'aac']), '-c:v', 'libx264', '-preset', 'medium', '-crf', '20', '-movflags', '+faststart', output], { stdio: ['ignore', 'ignore', 'pipe'] });
-      projects.set(id, { ...project, exportStatus: 'processing', exportOutput: output, exportProgress: 1 }); persist(); logProject(id, 'FFmpeg 렌더링을 시작했습니다.');
-      child.stderr.on('data', chunk => { const match = String(chunk).match(/time=(\d+):(\d+):(\d+\.\d+)/); if (!match) return; const seconds = Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3]); const current = projects.get(id); if (current) { projects.set(id, { ...current, exportProgress: Math.min(99, Math.round(seconds / Math.max(1, current.duration || 60) * 100)) }); persist(); } });
-      child.on('close', async code => { if(code!==0) await unlink(output).catch(()=>{}); logProject(id, code === 0 ? '렌더링이 완료되었습니다.' : '렌더링에 실패했습니다.'); const current = projects.get(id); if (current) { projects.set(id, { ...current, exportStatus: code === 0 ? 'ready' : 'failed', exportProgress: code === 0 ? 100 : 0 }); persist(); } });
-    }
-    return json(res, 202, { id, status: 'queued', manifest: { title: project.title, source: project.source, captions: project.captions || [], captionCues: project.captionCues || [], editorState: project.editorState || {}, visualAsset: project.editorState?.visualAsset || null } });
-  }
-  if (req.method === 'GET' && exportJob) {
-    const project = visibleProject(req, exportJob[1]);
-    if (!project) return json(res, 404, { error: '프로젝트를 찾을 수 없습니다.' });
-    if (project.exportStatus !== 'ready' || !project.exportOutput) return json(res, 409, { error: '렌더 결과가 아직 준비되지 않았습니다.', status: project.exportStatus || 'queued' });
-    res.writeHead(200, { 'content-type': 'video/mp4', 'content-disposition': `attachment; filename="${project.title || 'skyclip'}.mp4"` });
-    return createReadStream(project.exportOutput).pipe(res);
-  }
-  return json(res, 404, { error: '경로를 찾을 수 없습니다.' });
-});
-
-const port = Number(process.env.PORT || 8787);
-server.on('error', error => {
-  if (error.code === 'EADDRINUSE') {
-    console.error(`SkyClip 서버가 이미 실행 중입니다: http://localhost:${port}`);
-    console.error('기존 서버를 사용하거나 다른 PORT 값을 지정하세요.');
-    process.exitCode = 1;
+  const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
+  try { if (await handleApi(req, res, url)) return; } catch (error) { json(res, 400, { ok: false, error: error.message }); return; }
+  if (url.pathname.startsWith('/media/')) {
+    const mediaName = basename(url.pathname.slice('/media/'.length));
+    const mediaPath = normalize(join(uploadRoot, mediaName));
+    if (!mediaPath.startsWith(uploadRoot)) { res.writeHead(403); res.end('Forbidden'); return; }
+    try { const body = await readFile(mediaPath); const type = mediaName.endsWith('.vtt') ? 'text/vtt; charset=utf-8' : 'video/mp4'; res.writeHead(200, { 'content-type': type, 'content-length': body.length, 'accept-ranges': 'bytes', 'cache-control': 'no-store' }); res.end(body); } catch { res.writeHead(404); res.end('Not found'); }
     return;
   }
-  console.error('SkyClip 서버 시작 실패:', error);
-  process.exitCode = 1;
+  const requested = url.pathname === '/' ? '/index.html' : url.pathname;
+  const filePath = normalize(join(root, requested));
+  if (!filePath.startsWith(root)) {
+    res.writeHead(403); res.end('Forbidden'); return;
+  }
+  try {
+    const body = await readFile(filePath);
+    res.writeHead(200, { 'content-type': types[extname(filePath)] || 'application/octet-stream', 'cache-control': 'no-store' });
+    res.end(body);
+  } catch {
+    const fallback = await readFile(join(root, 'index.html'));
+    res.writeHead(200, { 'content-type': types['.html'], 'cache-control': 'no-store' });
+    res.end(fallback);
+  }
 });
-const shutdown = signal => { console.log(`[SkyClip] ${signal} 수신, 서버를 안전하게 종료합니다.`); server.close(() => process.exit(0)); setTimeout(() => process.exit(1), 5000).unref(); };
-process.on('SIGINT', () => shutdown('SIGINT'));
-process.on('SIGTERM', () => shutdown('SIGTERM'));
-server.listen(port, '0.0.0.0', () => console.log(`SkyClip API listening on http://localhost:${port}`));
 
+function listen(nextPort) {
+  const onError = (error) => {
+    server.removeListener('listening', onListening);
+    if (error.code === 'EADDRINUSE' && !process.env.PORT) {
+      console.warn(`Port ${nextPort} is busy; trying ${nextPort + 1}.`);
+      server.close(() => listen(nextPort + 1));
+      return;
+    }
+    throw error;
+  };
+  const onListening = () => {
+    server.removeListener('error', onError);
+    console.log(`SkyClip running at http://127.0.0.1:${nextPort}`);
+  };
+  server.once('error', onError);
+  server.once('listening', onListening);
+  server.listen(nextPort, '0.0.0.0');
+}
+
+listen(requestedPort);

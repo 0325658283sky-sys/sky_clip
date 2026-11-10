@@ -61,7 +61,9 @@ async function extractClip(sourcePath, projectId, index, start, end) {
   await execFile('ffmpeg', ['-y', '-ss', String(start), '-i', sourcePath, '-t', String(duration), '-vf', 'scale=720:-2', '-c:v', 'libx264', '-preset', 'veryfast', '-c:a', 'aac', '-movflags', '+faststart', clipPath], { windowsHide: true, timeoutMs: 180000 });
   await execFile('ffmpeg', ['-y', '-ss', String(start), '-i', sourcePath, '-frames:v', '1', '-q:v', '3', thumbPath], { windowsHide: true, timeoutMs: 60000 });
   const audio = await measureAudio(clipPath, duration);
-  return { id: `${projectId}-${index}`, start, end, duration, title: `핵심 장면 ${index}`, score: audio.score, scoreType: '기초 오디오 지표', metrics: audio, previewUrl: `/media/${basename(clipPath)}`, thumbnailUrl: `/media/${basename(thumbPath)}` };
+  const durationFit = Math.max(0, Math.min(1, 1 - Math.abs(duration - 22) / 22));
+  const scoreBreakdown = { speechCoverage: audio.speechCoverage, silenceEvents: audio.silenceEvents, durationFit: Number(durationFit.toFixed(3)), evidence: ['실제 오디오 무음 구간', '클립 길이'] };
+  return { id: `${projectId}-${index}`, start, end, duration, title: `핵심 장면 ${index}`, score: audio.score, scoreType: '기초 오디오 지표', metrics: audio, scoreBreakdown, previewUrl: `/media/${basename(clipPath)}`, thumbnailUrl: `/media/${basename(thumbPath)}` };
 }
 
 async function measureAudio(filePath, duration) {
@@ -111,7 +113,7 @@ async function handleApi(req, res, url) {
     templates.push(template); await writeFile(file, JSON.stringify(templates, null, 2)); json(res, 201, template); return true;
   }
   if (req.method === 'POST' && url.pathname === '/api/assets') {
-    const id = randomUUID(); const name = String(req.headers['x-file-name'] || 'asset.bin').replace(/[^a-zA-Z0-9._-]/g, '_'); const assetPath = join(uploadRoot, `${id}-${name}`); await writeFile(assetPath, await readBody(req)); const asset = { id, name, kind: String(req.headers['x-asset-kind'] || 'file'), url: `/media/${basename(assetPath)}`, createdAt: new Date().toISOString() }; await writeFile(join(dataRoot, `asset-${id}.json`), JSON.stringify(asset, null, 2)); json(res, 201, asset); return true;
+    const id = randomUUID(); const name = String(req.headers['x-file-name'] || 'asset.bin').replace(/[^a-zA-Z0-9._-]/g, '_'); const assetPath = join(uploadRoot, `${id}-${name}`); await writeFile(assetPath, await readBody(req)); const asset = { id, name, kind: String(req.headers['x-asset-kind'] || 'file'), path: assetPath, url: `/media/${basename(assetPath)}`, createdAt: new Date().toISOString() }; await writeFile(join(dataRoot, `asset-${id}.json`), JSON.stringify(asset, null, 2)); json(res, 201, asset); return true;
   }
   if (req.method === 'GET' && url.pathname === '/api/assets') {
     const entries = await (await import('node:fs/promises')).readdir(dataRoot, { withFileTypes: true }); const assets = [];
@@ -174,11 +176,18 @@ async function handleApi(req, res, url) {
     }
     if (exportOptions.captionStyle) project.edit = { ...(project.edit || {}), captionStyle: exportOptions.captionStyle };
     const args = ['-y', '-ss', String(start), '-i', source];
+    let overlayAsset = null;
+    if (exportOptions.assetId) { try { overlayAsset = JSON.parse(await readFile(join(dataRoot, `asset-${exportOptions.assetId}.json`), 'utf8')); } catch {} }
+    const hasImageOverlay = Boolean(overlayAsset?.path && overlayAsset.kind === 'image');
+    if (hasImageOverlay) args.push('-i', overlayAsset.path);
     let filter = 'scale=720:-2';
     if (duration) args.push('-t', String(duration));
-    if (project.captionPath) args.push('-f', 'webvtt', '-i', project.captionPath, '-map', '0:v:0', '-map', '0:a?', '-map', '1:0', '-c:s', 'mov_text');
+    let captionInputIndex = null;
+    if (project.captionPath) { captionInputIndex = hasImageOverlay ? 2 : 1; args.push('-f', 'webvtt', '-i', project.captionPath, '-map', '0:a?', '-map', `${captionInputIndex}:0`, '-c:s', 'mov_text'); }
     if (exportOptions.burnCaptions && project.captionPath) { const captionFile = project.captionPath.replaceAll('\\', '/').replaceAll(':', '\\:'); const style = project.edit?.captionStyle || {}; const fontSize = Math.max(12, Math.min(72, Number(style.fontSize) || 28)); filter = `subtitles=filename='${captionFile}':force_style='FontSize=${fontSize},Alignment=2,Outline=2,MarginV=36',${filter}`; }
-    args.push('-vf', filter, '-c:v', 'libx264', '-preset', 'veryfast', '-c:a', 'aac', '-movflags', '+faststart', output);
+    if (hasImageOverlay) { args.push('-filter_complex', `[0:v]${filter}[base];[1:v]format=rgba,colorchannelmixer=aa=0.65[asset];[base][asset]overlay=W-w-24:H-h-24[vout]`, '-map', '[vout]'); if (!project.captionPath) args.push('-map', '0:a?'); } else { args.push('-vf', filter, '-map', '0:v:0'); }
+    args.push('-c:v', 'libx264', '-preset', 'veryfast', '-c:a', 'aac', '-movflags', '+faststart', output);
+    project.edit = { ...(project.edit || {}), assetId: exportOptions.assetId || project.edit?.assetId || null };
     await execFile('ffmpeg', args, { windowsHide: true });
     project.exportPath = output; project.exportUrl = `/media/${basename(output)}`; project.exportStatus = 'completed';
     await writeFile(projectPath, JSON.stringify(project, null, 2)); json(res, 200, { ok: true, downloadUrl: project.exportUrl }); return true;
@@ -187,7 +196,7 @@ async function handleApi(req, res, url) {
   if (req.method === 'POST' && editMatch) {
     const projectPath = join(dataRoot, `${editMatch[1]}.json`); const project = JSON.parse(await readFile(projectPath, 'utf8'));
     const payload = JSON.parse((await readBody(req, 2 * 1024 * 1024)).toString('utf8'));
-    project.edit = { start: Math.max(0, Number(payload.start) || 0), end: payload.end == null ? null : Math.max(0, Number(payload.end)), segments: Array.isArray(payload.segments) ? payload.segments : [], tool: payload.tool || project.edit?.tool || null, templateId: payload.templateId || project.edit?.templateId || null, captionStyle: payload.captionStyle || project.edit?.captionStyle || null };
+    project.edit = { start: Math.max(0, Number(payload.start) || 0), end: payload.end == null ? null : Math.max(0, Number(payload.end)), segments: Array.isArray(payload.segments) ? payload.segments : [], tool: payload.tool || project.edit?.tool || null, templateId: payload.templateId || project.edit?.templateId || null, assetId: payload.assetId || project.edit?.assetId || null, captionStyle: payload.captionStyle || project.edit?.captionStyle || null };
     if (typeof payload.title === 'string' && payload.title.trim()) project.title = payload.title.trim();
     await writeFile(projectPath, JSON.stringify(project, null, 2)); json(res, 200, { ok: true, edit: project.edit }); return true;
   }

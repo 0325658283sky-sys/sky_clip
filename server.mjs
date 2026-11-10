@@ -159,6 +159,7 @@ async function handleApi(req, res, url) {
     const projectPath = join(dataRoot, `${editMatch[1]}.json`); const project = JSON.parse(await readFile(projectPath, 'utf8'));
     const payload = JSON.parse((await readBody(req, 2 * 1024 * 1024)).toString('utf8'));
     project.edit = { start: Math.max(0, Number(payload.start) || 0), end: payload.end == null ? null : Math.max(0, Number(payload.end)), segments: Array.isArray(payload.segments) ? payload.segments : [] };
+    if (typeof payload.title === 'string' && payload.title.trim()) project.title = payload.title.trim();
     await writeFile(projectPath, JSON.stringify(project, null, 2)); json(res, 200, { ok: true, edit: project.edit }); return true;
   }
   const captionMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/captions$/);

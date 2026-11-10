@@ -95,7 +95,7 @@ function bind() {
   const saveEditor = document.querySelector('.editor-bar [data-action="save"]');
   if (saveEditor && state.project?.id) saveEditor.addEventListener('click', async () => {
     const current = document.querySelector('.editor-video')?.currentTime || 0;
-    await fetch(`/api/projects/${state.project.id}/edit`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ start: 0, end: current || null, segments: [{ start: 0, end: current || null }] }) });
+    await fetch(`/api/projects/${state.project.id}/edit`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title: state.clipTitle, start: 0, end: current || null, segments: [{ start: 0, end: current || null }] }) });
   });
   const dropzone = document.querySelector('.dropzone');
   if (dropzone && state.route === 'templates') {

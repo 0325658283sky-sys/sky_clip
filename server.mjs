@@ -114,12 +114,14 @@ const json = (res, status, body) => {
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'access-control-allow-origin': '*' });
   res.end(JSON.stringify(body));
 };
+const applySecurityHeaders = res => { res.setHeader('x-content-type-options', 'nosniff'); res.setHeader('x-frame-options', 'SAMEORIGIN'); res.setHeader('referrer-policy', 'strict-origin-when-cross-origin'); };
 const signWorkspace = workspaceId => createHmac('sha256', workspaceSecret).update(workspaceId).digest('hex');
 const workspaceIdFromRequest = req => { const cookieValue = String(req.headers.cookie || '').match(/(?:^|;\s*)skyclip_workspace=([^;]+)/)?.[1] || ''; if (workspaceSecret && cookieValue) { const [workspaceId, signature] = decodeURIComponent(cookieValue).split('.'); if (workspaceId && signature && /^[a-f0-9]{64}$/.test(signature)) { const expected = signWorkspace(workspaceId); if (timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) return workspaceId; } return 'unauthenticated-workspace'; } return req.headers['x-workspace-id'] || cookieValue || 'demo-workspace'; };
 const visibleProject = (req, id) => { const project = projects.get(id); return project && project.workspaceId === workspaceIdFromRequest(req) ? project : null; };
 const workspaceBalance = workspaceId => { if (!creditBalances.has(workspaceId)) creditBalances.set(workspaceId, creditBalance); return creditBalances.get(workspaceId); };
 
 const server = createServer(async (req, res) => {
+  applySecurityHeaders(res);
   if (req.method === 'OPTIONS') { res.writeHead(204, { 'access-control-allow-origin': '*', 'access-control-allow-methods': 'GET,POST,PUT,DELETE,OPTIONS', 'access-control-allow-headers': 'content-type,x-workspace-id' }); return res.end(); }
   const url = new URL(req.url, 'http://localhost');
   if (req.method === 'GET' && !url.pathname.startsWith('/api/')) {

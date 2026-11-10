@@ -15,6 +15,12 @@
 | 저장소 경로 분리 | `verify-storage.mjs`, `SKYCLIP_UPLOAD_DIR`, `SKYCLIP_RENDER_DIR` |
 | 자동 검증 | `npm run qa:full` |
 
+## 최근 런타임 검증 기록
+
+- `npm run qa:full` 전체 통과: API, 실제 FFmpeg 클립, 1080×1920 출력, STT/하이라이트 어댑터, 인증 경계, 저장소, 프롬프트 클립
+- 샘플 영상 실제 길이 probe 및 추천 클립 `previewUrl` 생성 확인
+- 선택 구간 MP4 내보내기 완료 상태와 `exportProgress: 100` 확인
+
 ## 외부 인프라가 필요한 잔여 범위
 
 - 실제 OAuth/OIDC 제공자와 사용자 계정 매핑

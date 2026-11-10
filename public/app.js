@@ -73,8 +73,8 @@ function bind() {
     const snapshot = () => ({ time: video.currentTime || 0, segment: timelineButtons[5].dataset.segmentStart || null });
     const restore = snap => { video.currentTime = snap.time; if (snap.segment) timelineButtons[5].dataset.segmentStart = snap.segment; };
     const record = () => { state.history.push(snapshot()); state.future = []; };
-    historyControls.children[0].onclick = () => { const current = snapshot(); const previous = state.history.pop(); if (!previous) return; state.future.push(current); restore(previous); };
-    historyControls.children[1].onclick = () => { const next = state.future.pop(); if (!next) return; state.history.push(snapshot()); restore(next); };
+    historyControls.children[0].onclick = async () => { const current = snapshot(); const previous = state.history.pop(); if (previous) { state.future.push(current); restore(previous); } if (state.project?.id) await fetch(`/api/projects/${state.project.id}/edit/undo`, { method: 'POST' }); };
+    historyControls.children[1].onclick = async () => { const next = state.future.pop(); if (next) { state.history.push(snapshot()); restore(next); } if (state.project?.id) await fetch(`/api/projects/${state.project.id}/edit/redo`, { method: 'POST' }); };
     const move = delta => { video.currentTime = Math.max(0, Math.min(video.duration || 0, video.currentTime + delta)); };
     timelineButtons[0].onclick = () => move(-5);
     timelineButtons[1].onclick = () => move(-1 / 30);

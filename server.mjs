@@ -178,14 +178,19 @@ async function handleApi(req, res, url) {
     const args = ['-y', '-ss', String(start), '-i', source];
     let overlayAsset = null;
     if (exportOptions.assetId) { try { overlayAsset = JSON.parse(await readFile(join(dataRoot, `asset-${exportOptions.assetId}.json`), 'utf8')); } catch {} }
-    const hasImageOverlay = Boolean(overlayAsset?.path && overlayAsset.kind === 'image');
-    if (hasImageOverlay) args.push('-i', overlayAsset.path);
+    const hasVisualOverlay = Boolean(overlayAsset?.path && ['image', 'video'].includes(overlayAsset.kind));
+    const hasAudioAsset = Boolean(overlayAsset?.path && overlayAsset.kind === 'audio');
+    let nextInput = 1; let visualInputIndex = null; let audioInputIndex = null; let captionInputIndex = null;
+    if (hasVisualOverlay) { if (overlayAsset.kind === 'video') args.push('-stream_loop', '-1'); args.push('-i', overlayAsset.path); visualInputIndex = nextInput++; }
     let filter = 'scale=720:-2';
     if (duration) args.push('-t', String(duration));
-    let captionInputIndex = null;
-    if (project.captionPath) { captionInputIndex = hasImageOverlay ? 2 : 1; args.push('-f', 'webvtt', '-i', project.captionPath, '-map', '0:a?', '-map', `${captionInputIndex}:0`, '-c:s', 'mov_text'); }
+    if (project.captionPath) { captionInputIndex = nextInput++; args.push('-f', 'webvtt', '-i', project.captionPath); }
+    if (hasAudioAsset) { args.push('-stream_loop', '-1', '-i', overlayAsset.path); audioInputIndex = nextInput++; }
     if (exportOptions.burnCaptions && project.captionPath) { const captionFile = project.captionPath.replaceAll('\\', '/').replaceAll(':', '\\:'); const style = project.edit?.captionStyle || {}; const fontSize = Math.max(12, Math.min(72, Number(style.fontSize) || 28)); filter = `subtitles=filename='${captionFile}':force_style='FontSize=${fontSize},Alignment=2,Outline=2,MarginV=36',${filter}`; }
-    if (hasImageOverlay) { args.push('-filter_complex', `[0:v]${filter}[base];[1:v]format=rgba,colorchannelmixer=aa=0.65[asset];[base][asset]overlay=W-w-24:H-h-24[vout]`, '-map', '[vout]'); if (!project.captionPath) args.push('-map', '0:a?'); } else { args.push('-vf', filter, '-map', '0:v:0'); }
+    if (hasVisualOverlay) { args.push('-filter_complex', `[0:v]${filter}[base];[${visualInputIndex}:v]format=rgba,colorchannelmixer=aa=0.65[asset];[base][asset]overlay=W-w-24:H-h-24[vout]`, '-map', '[vout]'); } else { args.push('-vf', filter, '-map', '0:v:0'); }
+    if (hasAudioAsset) args.push('-map', `${audioInputIndex}:a:0`); else args.push('-map', '0:a?');
+    if (hasVisualOverlay || hasAudioAsset) args.push('-shortest');
+    if (captionInputIndex !== null) args.push('-map', `${captionInputIndex}:0`, '-c:s', 'mov_text');
     args.push('-c:v', 'libx264', '-preset', 'veryfast', '-c:a', 'aac', '-movflags', '+faststart', output);
     project.edit = { ...(project.edit || {}), assetId: exportOptions.assetId || project.edit?.assetId || null };
     await execFile('ffmpeg', args, { windowsHide: true });
@@ -193,9 +198,18 @@ async function handleApi(req, res, url) {
     await writeFile(projectPath, JSON.stringify(project, null, 2)); json(res, 200, { ok: true, downloadUrl: project.exportUrl }); return true;
   }
   const editMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/edit$/);
+  const editHistoryMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/edit\/(undo|redo)$/);
+  if (req.method === 'POST' && editHistoryMatch) {
+    const projectPath = join(dataRoot, `${editHistoryMatch[1]}.json`); const project = JSON.parse(await readFile(projectPath, 'utf8')); const direction = editHistoryMatch[2];
+    const history = Array.isArray(project.editHistory) ? project.editHistory : []; const future = Array.isArray(project.editFuture) ? project.editFuture : [];
+    if (direction === 'undo' && history.length) { future.push(project.edit || null); project.edit = history.pop(); }
+    if (direction === 'redo' && future.length) { history.push(project.edit || null); project.edit = future.pop(); }
+    project.editHistory = history; project.editFuture = future; await writeFile(projectPath, JSON.stringify(project, null, 2)); json(res, 200, { ok: true, edit: project.edit, canUndo: history.length > 0, canRedo: future.length > 0 }); return true;
+  }
   if (req.method === 'POST' && editMatch) {
     const projectPath = join(dataRoot, `${editMatch[1]}.json`); const project = JSON.parse(await readFile(projectPath, 'utf8'));
     const payload = JSON.parse((await readBody(req, 2 * 1024 * 1024)).toString('utf8'));
+    if (project.edit) { project.editHistory = Array.isArray(project.editHistory) ? project.editHistory : []; project.editHistory.push(project.edit); if (project.editHistory.length > 30) project.editHistory.shift(); project.editFuture = []; }
     project.edit = { start: Math.max(0, Number(payload.start) || 0), end: payload.end == null ? null : Math.max(0, Number(payload.end)), segments: Array.isArray(payload.segments) ? payload.segments : [], tool: payload.tool || project.edit?.tool || null, templateId: payload.templateId || project.edit?.templateId || null, assetId: payload.assetId || project.edit?.assetId || null, captionStyle: payload.captionStyle || project.edit?.captionStyle || null };
     if (typeof payload.title === 'string' && payload.title.trim()) project.title = payload.title.trim();
     await writeFile(projectPath, JSON.stringify(project, null, 2)); json(res, 200, { ok: true, edit: project.edit }); return true;

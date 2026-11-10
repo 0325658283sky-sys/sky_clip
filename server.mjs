@@ -52,6 +52,11 @@ async function extractPreview(sourcePath, projectId) {
   } catch { return null; }
 }
 
+async function downloadYouTube(url, outputPath) {
+  await execFile('yt-dlp.exe', ['--no-playlist', '-f', 'bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/b', '--merge-output-format', 'mp4', '-o', outputPath, url], { windowsHide: true });
+  return outputPath;
+}
+
 async function handleApi(req, res, url) {
   if (url.pathname === '/api/health') { json(res, 200, { ok: true, service: 'skyclip', mode: 'local' }); return true; }
   if (req.method === 'GET' && url.pathname === '/api/projects') {
@@ -77,7 +82,10 @@ async function handleApi(req, res, url) {
       const payload = JSON.parse((await readBody(req, 2 * 1024 * 1024)).toString('utf8'));
       const sourceUrl = String(payload.url || '').trim();
       let project = { id: projectId, sourceType: 'url', source: sourceUrl, fileName: null, status: 'needs-source', progress: 0, metadata: null, createdAt: new Date().toISOString() };
-      if (/^https?:\/\/.*\.(mp4|mov|webm)(\?.*)?$/i.test(sourceUrl)) {
+      if (/^(https?:\/\/)?(www\.)?(youtube\.com\/watch\?v=|youtu\.be\/)/i.test(sourceUrl)) {
+        const sourcePath = join(uploadRoot, `${projectId}-youtube.mp4`); await downloadYouTube(sourceUrl, sourcePath);
+        project = { ...project, sourceType: 'file', source: sourcePath, fileName: 'youtube-video.mp4', status: 'ready', metadata: await probe(sourcePath) };
+      } else if (/^https?:\/\/.*\.(mp4|mov|webm)(\?.*)?$/i.test(sourceUrl)) {
         const remote = await fetch(sourceUrl); if (!remote.ok) throw new Error(`영상 링크를 가져오지 못했습니다. (${remote.status})`);
         const remoteBody = Buffer.from(await remote.arrayBuffer()); if (remoteBody.length > 1024 * 1024 * 1024) throw new Error('원격 영상이 1GB를 초과합니다.');
         const fileName = basename(new URL(sourceUrl).pathname) || 'remote-video.mp4'; const sourcePath = join(uploadRoot, `${projectId}-${fileName}`); await writeFile(sourcePath, remoteBody);

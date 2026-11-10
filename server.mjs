@@ -188,6 +188,7 @@ async function handleApi(req, res, url) {
     if (project.captionPath) { captionInputIndex = nextInput++; args.push('-f', 'webvtt', '-i', project.captionPath); }
     if (hasAudioAsset) { args.push('-stream_loop', '-1', '-i', overlayAsset.path); audioInputIndex = nextInput++; }
     if (exportOptions.burnCaptions && project.captionPath) { const captionFile = project.captionPath.replaceAll('\\', '/').replaceAll(':', '\\:'); const style = project.edit?.captionStyle || {}; const fontSize = Math.max(12, Math.min(72, Number(style.fontSize) || 28)); const alignment = style.position === 'top' ? 8 : style.position === 'middle' ? 5 : 2; const rawColor = String(style.color || '#ffffff').replace('#', '').padEnd(6, 'f').slice(0, 6); const assColor = `&H00${rawColor.slice(4, 6)}${rawColor.slice(2, 4)}${rawColor.slice(0, 2)}`; filter = `subtitles=filename='${captionFile}':force_style='FontSize=${fontSize},PrimaryColour=${assColor},Alignment=${alignment},Outline=2,MarginV=36',${filter}`; }
+    for (const layer of (project.edit?.layers || [])) if (layer.type === 'text' && layer.text) { const text = escapeDrawtext(layer.text); const size = Math.max(12, Math.min(96, Number(layer.fontSize) || 32)); const y = layer.position === 'bottom' ? 'h-text_h-80' : layer.position === 'middle' ? '(h-text_h)/2' : '80'; filter = `${filter},drawtext=fontfile='C\\:/Windows/Fonts/arial.ttf':text='${text}':fontcolor=${layer.color || 'white'}:fontsize=${size}:borderw=2:bordercolor=black@0.7:x=(w-text_w)/2:y=${y}`; }
     if (hasVisualOverlay) { args.push('-filter_complex', `[0:v]${filter}[base];[${visualInputIndex}:v]format=rgba,colorchannelmixer=aa=0.65[asset];[base][asset]overlay=W-w-24:H-h-24[vout]`, '-map', '[vout]'); } else { args.push('-vf', filter, '-map', '0:v:0'); }
     if (hasAudioAsset) args.push('-map', `${audioInputIndex}:a:0`); else args.push('-map', '0:a?');
     if (hasVisualOverlay || hasAudioAsset) args.push('-shortest');
@@ -211,7 +212,7 @@ async function handleApi(req, res, url) {
     const projectPath = join(dataRoot, `${editMatch[1]}.json`); const project = JSON.parse(await readFile(projectPath, 'utf8'));
     const payload = JSON.parse((await readBody(req, 2 * 1024 * 1024)).toString('utf8'));
     if (project.edit) { project.editHistory = Array.isArray(project.editHistory) ? project.editHistory : []; project.editHistory.push(project.edit); if (project.editHistory.length > 30) project.editHistory.shift(); project.editFuture = []; }
-    project.edit = { start: Math.max(0, Number(payload.start) || 0), end: payload.end == null ? null : Math.max(0, Number(payload.end)), segments: Array.isArray(payload.segments) ? payload.segments : [], tool: payload.tool || project.edit?.tool || null, templateId: payload.templateId || project.edit?.templateId || null, assetId: payload.assetId || project.edit?.assetId || null, captionStyle: payload.captionStyle || project.edit?.captionStyle || null };
+    project.edit = { start: Math.max(0, Number(payload.start) || 0), end: payload.end == null ? null : Math.max(0, Number(payload.end)), segments: Array.isArray(payload.segments) ? payload.segments : [], layers: Array.isArray(payload.layers) ? payload.layers : project.edit?.layers || [], tool: payload.tool || project.edit?.tool || null, templateId: payload.templateId || project.edit?.templateId || null, assetId: payload.assetId || project.edit?.assetId || null, captionStyle: payload.captionStyle || project.edit?.captionStyle || null };
     if (typeof payload.title === 'string' && payload.title.trim()) project.title = payload.title.trim();
     await writeFile(projectPath, JSON.stringify(project, null, 2)); json(res, 200, { ok: true, edit: project.edit }); return true;
   }
@@ -242,6 +243,7 @@ async function handleApi(req, res, url) {
 }
 
 function toVttTime(seconds) { const safe = Math.max(0, Number(seconds) || 0); const h = Math.floor(safe / 3600); const m = Math.floor((safe % 3600) / 60); const s = (safe % 60).toFixed(3).padStart(6, '0'); return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${s}`; }
+function escapeDrawtext(value) { return String(value || '').replaceAll('\\', '\\\\').replaceAll(':', '\\:').replaceAll("'", "\\'").replaceAll(',', '\\,').replaceAll('[', '\\[').replaceAll(']', '\\]'); }
 
 const server = createServer(async (req, res) => {
   const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);

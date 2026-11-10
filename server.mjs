@@ -90,7 +90,8 @@ async function prepareYouTubeProject(project, sourcePath) {
   try {
     await downloadYouTube(project.source, sourcePath);
     project.sourceType = 'file'; project.source = sourcePath; project.fileName = 'youtube-video.mp4'; project.status = 'ready'; project.progress = 55; project.metadata = await probe(sourcePath);
-  } catch (error) { project.status = 'failed'; project.error = error.message; }
+  } catch (error) { project.status = 'failed'; project.progress = 0; project.error = error.message || '링크 영상 다운로드 시간이 초과되었습니다.'; }
+  project.updatedAt = new Date().toISOString();
   await writeFile(projectPath, JSON.stringify(project, null, 2));
 }
 
@@ -103,7 +104,7 @@ async function handleApi(req, res, url) {
     projects.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))); json(res, 200, { projects }); return true;
   }
   const projectGet = url.pathname.match(/^\/api\/projects\/([^/]+)$/);
-  if (req.method === 'GET' && projectGet) { const project = JSON.parse(await readFile(join(dataRoot, `${projectGet[1]}.json`), 'utf8')); json(res, 200, project); return true; }
+  if (req.method === 'GET' && projectGet) { const projectPath = join(dataRoot, `${projectGet[1]}.json`); const project = JSON.parse(await readFile(projectPath, 'utf8')); const started = Date.parse(project.downloadStartedAt || ''); if (project.status === 'downloading' && Number.isFinite(started) && Date.now() - started > 60000) { project.status = 'failed'; project.progress = 0; project.error = '링크 영상 다운로드가 60초 이상 진행되지 않아 중단되었습니다. 다시 시도해 주세요.'; project.updatedAt = new Date().toISOString(); await writeFile(projectPath, JSON.stringify(project, null, 2)); } json(res, 200, project); return true; }
   if (req.method === 'GET' && url.pathname === '/api/templates') {
     const file = join(dataRoot, 'templates.json'); try { json(res, 200, { templates: JSON.parse(await readFile(file, 'utf8')) }); } catch { json(res, 200, { templates: [] }); } return true;
   }
@@ -127,7 +128,7 @@ async function handleApi(req, res, url) {
       const sourceUrl = String(payload.url || '').trim();
       let project = { id: projectId, sourceType: 'url', source: sourceUrl, fileName: null, status: 'needs-source', progress: 0, metadata: null, createdAt: new Date().toISOString() };
       if (/^(https?:\/\/)?(www\.)?(youtube\.com\/watch\?v=|youtu\.be\/)/i.test(sourceUrl)) {
-        const sourcePath = join(uploadRoot, `${projectId}-youtube.mp4`); project.status = 'downloading'; project.progress = 5; await writeFile(join(dataRoot, `${projectId}.json`), JSON.stringify(project, null, 2)); void prepareYouTubeProject(project, sourcePath); json(res, 202, project); return true;
+        const sourcePath = join(uploadRoot, `${projectId}-youtube.mp4`); project.status = 'downloading'; project.progress = 5; project.downloadStartedAt = new Date().toISOString(); await writeFile(join(dataRoot, `${projectId}.json`), JSON.stringify(project, null, 2)); void prepareYouTubeProject(project, sourcePath); json(res, 202, project); return true;
       } else if (/^https?:\/\/.*\.(mp4|mov|webm)(\?.*)?$/i.test(sourceUrl)) {
         const remote = await fetch(sourceUrl); if (!remote.ok) throw new Error(`영상 링크를 가져오지 못했습니다. (${remote.status})`);
         const remoteBody = Buffer.from(await remote.arrayBuffer()); if (remoteBody.length > 1024 * 1024 * 1024) throw new Error('원격 영상이 1GB를 초과합니다.');
@@ -232,9 +233,10 @@ async function handleApi(req, res, url) {
     const scriptPath = join(fileURLToPath(new URL('.', import.meta.url)), 'scripts', 'stt.py');
     const result = await execFile('python', [scriptPath, source, captionPath], { windowsHide: true, timeoutMs: 900000 });
     const output = JSON.parse(result.stdout.trim()); if (!output.ok) throw new Error(output.error || 'STT 자막 생성에 실패했습니다.');
-    project.captions = output.captions || []; project.captionPath = captionPath; project.captionUrl = `/media/${basename(captionPath)}`;
-    project.stt = { engine: 'faster-whisper', model: output.model, language: output.language, completedAt: new Date().toISOString() };
-    await writeFile(projectPath, JSON.stringify(project, null, 2)); json(res, 200, { ok: true, captions: project.captions, captionUrl: project.captionUrl, stt: project.stt }); return true;
+    const generatedCaptions = output.captions || [];
+    if (generatedCaptions.length) { project.captions = generatedCaptions; project.captionPath = captionPath; project.captionUrl = `/media/${basename(captionPath)}`; }
+    project.stt = { engine: 'faster-whisper', model: output.model, language: output.language, count: generatedCaptions.length, warning: generatedCaptions.length ? null : '음성에서 인식된 대사가 없습니다. 기존 자막은 유지했습니다.', completedAt: new Date().toISOString() };
+    await writeFile(projectPath, JSON.stringify(project, null, 2)); json(res, 200, { ok: true, captions: project.captions || [], captionUrl: project.captionUrl || null, stt: project.stt }); return true;
   }
   return false;
 }

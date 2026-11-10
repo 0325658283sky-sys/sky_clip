@@ -79,7 +79,7 @@ function bind() {
     else if (name === '자동 레이아웃') { panel.innerHTML = '<h3>자동 레이아웃</h3><p>세로형 9:16 캔버스를 적용했습니다.</p>'; document.querySelector('.canvas-inner').style.aspectRatio = '9 / 16'; toast('9:16 자동 레이아웃을 적용했습니다.'); }
     else if (name === '원본 자막 가리기') { panel.innerHTML = '<h3>원본 자막 가리기</h3><p>자막 렌더링 시 원본 자막 영역을 가리는 옵션입니다.</p><button>옵션 저장</button>'; panel.querySelector('button').onclick = () => { state.saved = true; toast('원본 자막 가리기 옵션을 저장했습니다.'); }; }
     else { panel.innerHTML = `<h3>${name}</h3><p>현재 클립에 ${name} 도구를 선택했습니다.</p><button>선택 상태 저장</button>`; panel.querySelector('button').onclick = async () => { state.saved = true; if (state.project?.id) await fetch(`/api/projects/${state.project.id}/edit`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title: state.clipTitle, start: 0, end: null, segments: [], tool: name }) }); toast(`${name} 선택 상태가 저장되었습니다.`); }; }
-    inspectorPanel.append(panel);
+    inspectorPanel.prepend(panel); panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   });
   const video = document.querySelector('.editor-video');
   const timelineButtons = [...document.querySelectorAll('.timeline-actions button')];

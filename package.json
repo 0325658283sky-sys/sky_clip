@@ -19,5 +19,6 @@
     "verify:storage": "node verify-storage.mjs"
     ,"verify:ready": "node verify-ready.mjs"
     ,"verify:config": "node verify-config.mjs"
+    ,"verify:prompt": "node verify-prompt.mjs"
   }
 }

@@ -3,4 +3,5 @@ node_modules/
 renders/*
 !renders/.gitkeep
 .ready-check.json
+.prompt-verify.json
 .DS_Store

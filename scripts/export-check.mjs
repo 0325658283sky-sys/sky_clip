@@ -1,0 +1,10 @@
+const projectId = process.argv[2];
+const base = process.argv[3] || process.env.SKYCLIP_URL || 'http://127.0.0.1:8787';
+if (!projectId) throw new Error('사용법: node scripts/export-check.mjs <projectId> [baseUrl]');
+const response = await fetch(`${base}/api/projects/${projectId}/export`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ burnCaptions: true }) });
+if (!response.ok) throw new Error(`내보내기 요청 실패: ${response.status} ${await response.text()}`);
+const result = await response.json();
+const download = await fetch(new URL(result.downloadUrl, base));
+const bytes = Number(download.headers.get('content-length') || 0);
+console.log(JSON.stringify({ projectId, exportUrl: result.downloadUrl, httpStatus: download.status, contentType: download.headers.get('content-type'), bytes }, null, 2));
+if (!download.ok || bytes <= 0) process.exitCode = 1;

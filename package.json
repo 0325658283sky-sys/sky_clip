@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "start": "node server.mjs",
-    "test:acceptance": "node scripts/acceptance.mjs"
+    "test:acceptance": "node scripts/acceptance.mjs",
+    "test:export": "node scripts/export-check.mjs"
   }
 }

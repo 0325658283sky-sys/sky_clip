@@ -66,6 +66,16 @@ async function extractClip(sourcePath, projectId, index, start, end) {
   return { id: `${projectId}-${index}`, start, end, duration, title: `핵심 장면 ${index}`, score: audio.score, scoreType: '기초 오디오 지표', metrics: audio, scoreBreakdown, previewUrl: `/media/${basename(clipPath)}`, thumbnailUrl: `/media/${basename(thumbPath)}` };
 }
 
+async function renderSegments(sourcePath, projectId, segments) {
+  const files = [];
+  for (let index = 0; index < segments.length; index += 1) {
+    const segment = segments[index]; const start = Math.max(0, Number(segment.start) || 0); const duration = Math.max(0.1, (Number(segment.end) || start + 0.1) - start); const output = join(uploadRoot, `${projectId}-segment-${index + 1}.mp4`);
+    await execFile('ffmpeg', ['-y', '-ss', String(start), '-i', sourcePath, '-t', String(duration), '-c:v', 'libx264', '-preset', 'veryfast', '-c:a', 'aac', '-movflags', '+faststart', output], { windowsHide: true, timeoutMs: 180000 }); files.push(output);
+  }
+  const listPath = join(uploadRoot, `${projectId}-segments.txt`); await writeFile(listPath, files.map(file => `file '${file.replaceAll("'", "'\\''")}'`).join('\n'), 'utf8');
+  const combined = join(uploadRoot, `${projectId}-segments.mp4`); await execFile('ffmpeg', ['-y', '-f', 'concat', '-safe', '0', '-i', listPath, '-c', 'copy', '-movflags', '+faststart', combined], { windowsHide: true, timeoutMs: 180000 }); return combined;
+}
+
 async function measureAudio(filePath, duration) {
   try {
     const result = await execFile('ffmpeg', ['-hide_banner', '-i', filePath, '-af', 'silencedetect=noise=-35dB:d=0.45', '-f', 'null', '-'], { windowsHide: true, timeoutMs: 60000 });
@@ -166,10 +176,13 @@ async function handleApi(req, res, url) {
   if (req.method === 'POST' && exportMatch) {
     const projectPath = join(dataRoot, `${exportMatch[1]}.json`); const project = JSON.parse(await readFile(projectPath, 'utf8'));
     let exportOptions = {}; try { const body = await readBody(req, 1024 * 1024); if (body.length) exportOptions = JSON.parse(body.toString('utf8')); } catch {}
-    const source = project.previewPath || project.source; if (!source) throw new Error('내보낼 영상이 없습니다.');
+    let source = project.previewPath || project.source; if (!source) throw new Error('내보낼 영상이 없습니다.');
+    const segments = Array.isArray(project.edit?.segments) ? project.edit.segments.filter(item => Number(item.end) > Number(item.start)) : [];
+    const hasSegmentSequence = segments.length > 1;
+    if (hasSegmentSequence) source = await renderSegments(source, project.id, segments);
     const output = join(uploadRoot, `${project.id}-export.mp4`);
-    const start = Math.max(0, Number(project.edit?.start ?? 0));
-    const duration = project.edit?.end ? Math.max(0.1, Number(project.edit.end) - start) : null;
+    const start = hasSegmentSequence ? 0 : Math.max(0, Number(project.edit?.start ?? 0));
+    const duration = hasSegmentSequence ? null : project.edit?.end ? Math.max(0.1, Number(project.edit.end) - start) : null;
     if (exportOptions.templateId) {
       const templateFile = join(dataRoot, 'templates.json'); let templates = []; try { templates = JSON.parse(await readFile(templateFile, 'utf8')); } catch {}
       const template = templates.find(item => item.id === exportOptions.templateId); if (template) exportOptions.captionStyle = exportOptions.captionStyle || template.captionStyle;

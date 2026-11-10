@@ -136,6 +136,8 @@ async function handleApi(req, res, url) {
     if (contentType.includes('application/json')) {
       const payload = JSON.parse((await readBody(req, 2 * 1024 * 1024)).toString('utf8'));
       const sourceUrl = String(payload.url || '').trim();
+      const existingEntries = await (await import('node:fs/promises')).readdir(dataRoot, { withFileTypes: true });
+      for (const entry of existingEntries) if (entry.isFile() && entry.name.endsWith('.json')) { try { const existing = JSON.parse(await readFile(join(dataRoot, entry.name), 'utf8')); if (existing.status === 'downloading' && existing.source === sourceUrl) { json(res, 202, existing); return true; } } catch {} }
       let project = { id: projectId, sourceType: 'url', source: sourceUrl, fileName: null, status: 'needs-source', progress: 0, metadata: null, createdAt: new Date().toISOString() };
       if (/^(https?:\/\/)?(www\.)?(youtube\.com\/watch\?v=|youtu\.be\/)/i.test(sourceUrl)) {
         const sourcePath = join(uploadRoot, `${projectId}-youtube.mp4`); project.status = 'downloading'; project.progress = 5; project.downloadStartedAt = new Date().toISOString(); await writeFile(join(dataRoot, `${projectId}.json`), JSON.stringify(project, null, 2)); void prepareYouTubeProject(project, sourcePath); json(res, 202, project); return true;

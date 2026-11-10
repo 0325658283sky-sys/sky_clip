@@ -190,6 +190,12 @@ async function handleApi(req, res, url) {
     await writeFile(projectPath, JSON.stringify(project, null, 2)); json(res, 200, project); return true;
   }
   const exportMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/export$/);
+  const selectMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/select$/);
+  if (req.method === 'POST' && selectMatch) {
+    const projectPath = join(dataRoot, `${selectMatch[1]}.json`); const project = JSON.parse(await readFile(projectPath, 'utf8')); const payload = JSON.parse((await readBody(req, 1024 * 1024)).toString('utf8')); const clip = (project.clips || []).find(item => item.id === payload.clipId);
+    if (!clip) { json(res, 404, { ok: false, error: '선택한 클립을 찾을 수 없습니다.' }); return true; }
+    project.previewUrl = clip.previewUrl; project.previewPath = join(uploadRoot, basename(clip.previewUrl)); project.captions = clip.captions || project.captions || []; project.title = clip.title || project.title; project.selectedClipId = clip.id; await writeFile(projectPath, JSON.stringify(project, null, 2)); json(res, 200, { ok: true, selectedClipId: clip.id, previewUrl: project.previewUrl, captions: project.captions }); return true;
+  }
   const toolMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/tools\/([^/]+)$/);
   if (req.method === 'POST' && toolMatch && toolMatch[2] === 'silence') {
     const projectPath = join(dataRoot, `${toolMatch[1]}.json`); const project = JSON.parse(await readFile(projectPath, 'utf8')); const source = project.previewPath || project.source; const output = join(uploadRoot, `${project.id}-silence.mp4`);

@@ -26,7 +26,7 @@ async function createProject() {
     toast('분석 작업을 시작했습니다.');
     const analyzed = await fetch(`/api/projects/${state.project.id}/analyze`, { method: 'POST' });
     if (!analyzed.ok) throw new Error((await analyzed.json()).error || '분석에 실패했습니다.');
-    state.project = await analyzed.json(); state.clipTitle = state.project.clips?.[0]?.title || state.clipTitle; navigate('results');
+    state.project = await analyzed.json(); clips.splice(0, clips.length, ...(state.project.clips || []).map(clip => [clip.title, `00:${String(Math.round(clip.duration || (clip.end - clip.start))).padStart(2, '0')}`, clip.score, clip.thumbnailUrl])); state.clipTitle = state.project.clips?.[0]?.title || state.clipTitle; navigate('results');
   } catch (error) { toast(error.message); }
 }
 window.addEventListener('hashchange', () => { state.route = location.hash.slice(1) || 'dashboard'; render(); });
@@ -48,6 +48,19 @@ function bind() {
   }));
   document.querySelector('#file-input')?.addEventListener('change', event => { state.file = event.target.files[0]; render(); toast(`${state.file.name} 파일을 선택했습니다.`); });
   document.querySelectorAll('.tab').forEach(tab => tab.addEventListener('click', () => { document.querySelectorAll('.tab').forEach(item => item.classList.remove('active')); tab.classList.add('active'); }));
+  if (state.route === 'results' && state.project?.clips) document.querySelectorAll('.clip-row').forEach((row, index) => { const clip = state.project.clips[index]; if (!clip) return; const thumb = row.querySelector('.clip-thumb'); if (thumb && clip.thumbnailUrl) thumb.style.backgroundImage = `url("${clip.thumbnailUrl}")`; const score = row.querySelector('.score'); if (score && clip.score == null) score.innerHTML = '<small>분석 근거 준비 중</small>'; });
+  document.querySelectorAll('.editor-nav .tool, .inspector .tool').forEach(tool => tool.onclick = () => {
+    document.querySelectorAll('.tool').forEach(item => item.classList.remove('active')); tool.classList.add('active');
+    const name = tool.textContent.trim(); const inspectorPanel = document.querySelector('.inspector'); if (!inspectorPanel) return;
+    inspectorPanel.querySelector('.tool-feedback')?.remove(); const panel = document.createElement('div'); panel.className = 'tool-feedback';
+    if (name === '제목') { panel.innerHTML = `<h3>제목 편집</h3><input value="${state.clipTitle}"><button>적용</button>`; panel.querySelector('button').onclick = () => { state.clipTitle = panel.querySelector('input').value.trim() || state.clipTitle; const label = document.querySelector('.editor-bar b'); if (label) label.textContent = state.clipTitle; toast('제목이 적용되었습니다.'); }; }
+    else if (name === '자막') { panel.innerHTML = '<h3>자막 편집</h3><p>구간별 자막을 입력하고 저장하세요.</p>'; document.querySelector('.caption-editor')?.scrollIntoView({ behavior: 'smooth' }); }
+    else if (name === '템플릿') { panel.innerHTML = '<h3>템플릿</h3><p>저장된 템플릿을 관리합니다.</p><button>템플릿 화면 열기</button>'; panel.querySelector('button').onclick = () => navigate('templates'); }
+    else if (['이미지', '영상', '오디오', '요소'].includes(name)) { panel.innerHTML = `<h3>${name} 에셋</h3><p>에셋 보관함에서 파일을 선택해 추가할 수 있습니다.</p><button>에셋 보관함 열기</button>`; panel.querySelector('button').onclick = () => navigate('assets'); }
+    else if (name === '설정') { panel.innerHTML = '<h3>캔버스 설정</h3><button data-ratio="9:16">9:16 세로</button><button data-ratio="1:1">1:1 정사각형</button>'; panel.querySelectorAll('button').forEach(button => button.onclick = () => { document.querySelector('.canvas-inner').style.aspectRatio = button.dataset.ratio.replace(':', ' / '); toast(`캔버스 비율 ${button.dataset.ratio} 적용`); }); }
+    else { panel.innerHTML = `<h3>${name}</h3><p>현재 클립에 ${name} 도구를 선택했습니다.</p><button>선택 상태 저장</button>`; panel.querySelector('button').onclick = () => { state.saved = true; toast(`${name} 선택 상태가 저장되었습니다.`); }; }
+    inspectorPanel.append(panel);
+  });
   const video = document.querySelector('.editor-video');
   const timelineButtons = [...document.querySelectorAll('.timeline-actions button')];
   if (video && timelineButtons.length) {

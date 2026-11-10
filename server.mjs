@@ -55,6 +55,14 @@ async function extractPreview(sourcePath, projectId) {
   } catch { return null; }
 }
 
+async function extractClip(sourcePath, projectId, index, start, end) {
+  const clipPath = join(uploadRoot, `${projectId}-clip-${index}.mp4`); const thumbPath = join(uploadRoot, `${projectId}-clip-${index}.jpg`);
+  const duration = Math.max(0.5, end - start);
+  await execFile('ffmpeg', ['-y', '-ss', String(start), '-i', sourcePath, '-t', String(duration), '-vf', 'scale=720:-2', '-c:v', 'libx264', '-preset', 'veryfast', '-c:a', 'aac', '-movflags', '+faststart', clipPath], { windowsHide: true, timeoutMs: 180000 });
+  await execFile('ffmpeg', ['-y', '-ss', String(start), '-i', sourcePath, '-frames:v', '1', '-q:v', '3', thumbPath], { windowsHide: true, timeoutMs: 60000 });
+  return { id: `${projectId}-${index}`, start, end, duration, title: `핵심 장면 ${index}`, score: null, previewUrl: `/media/${basename(clipPath)}`, thumbnailUrl: `/media/${basename(thumbPath)}` };
+}
+
 async function downloadYouTube(url, outputPath) {
   await execFile('yt-dlp.exe', ['--no-playlist', '--socket-timeout', '20', '--retries', '1', '--fragment-retries', '1', '-f', 'bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/b', '--merge-output-format', 'mp4', '-o', outputPath, url], { windowsHide: true, timeoutMs: 120000 });
   return outputPath;
@@ -119,10 +127,10 @@ async function handleApi(req, res, url) {
     if (match[2] === 'preview' && project.sourceType === 'file') { const previewPath = await extractPreview(project.source, project.id); json(res, 200, { ok: Boolean(previewPath), previewPath }); return true; }
     project.status = 'analyzing'; project.progress = 18; await writeFile(projectPath, JSON.stringify(project, null, 2));
     if (project.sourceType === 'file') { project.previewPath = await extractPreview(project.source, project.id); project.previewUrl = project.previewPath ? `/media/${basename(project.previewPath)}` : null; }
-    project.status = 'completed'; project.progress = 100; project.clips = [
-      { id: `${project.id}-1`, start: 0, end: Math.min(15, project.metadata?.duration || 15), title: '첫 번째 핵심 장면', score: 91 },
-      { id: `${project.id}-2`, start: 15, end: Math.min(35, project.metadata?.duration || 35), title: '시청자가 멈추는 순간', score: 87 }
-    ];
+    const total = Number(project.metadata?.duration || 15); const firstEnd = Math.min(15, total); const secondStart = Math.min(15, total); const secondEnd = Math.min(35, total);
+    project.clips = [await extractClip(project.source, project.id, 1, 0, firstEnd)];
+    if (secondEnd > secondStart + 0.5) project.clips.push(await extractClip(project.source, project.id, 2, secondStart, secondEnd));
+    project.status = 'completed'; project.progress = 100;
     await writeFile(projectPath, JSON.stringify(project, null, 2)); json(res, 200, project); return true;
   }
   const exportMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/export$/);
@@ -169,7 +177,7 @@ const server = createServer(async (req, res) => {
     const mediaName = basename(url.pathname.slice('/media/'.length));
     const mediaPath = normalize(join(uploadRoot, mediaName));
     if (!mediaPath.startsWith(uploadRoot)) { res.writeHead(403); res.end('Forbidden'); return; }
-    try { const body = await readFile(mediaPath); const type = mediaName.endsWith('.vtt') ? 'text/vtt; charset=utf-8' : 'video/mp4'; res.writeHead(200, { 'content-type': type, 'content-length': body.length, 'accept-ranges': 'bytes', 'cache-control': 'no-store' }); res.end(body); } catch { res.writeHead(404); res.end('Not found'); }
+    try { const body = await readFile(mediaPath); const type = mediaName.endsWith('.vtt') ? 'text/vtt; charset=utf-8' : mediaName.endsWith('.jpg') ? 'image/jpeg' : 'video/mp4'; res.writeHead(200, { 'content-type': type, 'content-length': body.length, 'accept-ranges': 'bytes', 'cache-control': 'no-store' }); res.end(body); } catch { res.writeHead(404); res.end('Not found'); }
     return;
   }
   const requested = url.pathname === '/' ? '/index.html' : url.pathname;

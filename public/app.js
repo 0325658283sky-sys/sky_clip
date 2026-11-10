@@ -64,5 +64,14 @@ function bind() {
     const current = document.querySelector('.editor-video')?.currentTime || 0;
     await fetch(`/api/projects/${state.project.id}/edit`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ start: 0, end: current || null, segments: [{ start: 0, end: current || null }] }) });
   });
+  const dropzone = document.querySelector('.dropzone');
+  if (dropzone && state.route === 'templates') {
+    const templateForm = document.createElement('div'); templateForm.className = 'inline-form'; templateForm.innerHTML = '<input placeholder="템플릿 이름"><button>템플릿 저장</button>'; dropzone.before(templateForm);
+    templateForm.querySelector('button').onclick = async () => { const name = templateForm.querySelector('input').value.trim() || '새 템플릿'; const response = await fetch('/api/templates', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name, aspectRatio: '9:16' }) }); if (response.ok) { toast('템플릿이 저장되었습니다.'); templateForm.querySelector('input').value = ''; } else toast('템플릿 저장에 실패했습니다.'); };
+  }
+  if (dropzone && state.route === 'assets') {
+    const assetInput = document.createElement('input'); assetInput.type = 'file'; assetInput.accept = 'image/*,video/*,audio/*,.ttf,.otf'; assetInput.className = 'asset-picker'; dropzone.append(assetInput);
+    assetInput.onchange = async () => { const file = assetInput.files[0]; if (!file) return; const response = await fetch('/api/assets', { method: 'POST', headers: { 'content-type': file.type || 'application/octet-stream', 'x-file-name': file.name, 'x-asset-kind': file.type.split('/')[0] || 'file' }, body: file }); if (response.ok) toast('에셋이 저장되었습니다.'); else toast('에셋 업로드에 실패했습니다.'); };
+  }
 }
 render();

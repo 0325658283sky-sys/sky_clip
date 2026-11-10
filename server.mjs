@@ -75,7 +75,10 @@ async function extractClip(sourcePath, projectId, index, start, end) {
   const audio = await measureAudio(clipPath, duration);
   const durationFit = Math.max(0, Math.min(1, 1 - Math.abs(duration - 22) / 22));
   const scoreBreakdown = { speechCoverage: audio.speechCoverage, silenceEvents: audio.silenceEvents, durationFit: Number(durationFit.toFixed(3)), evidence: ['실제 오디오 무음 구간', '클립 길이'] };
-  return { id: `${projectId}-${index}`, start, end, duration, title: `핵심 장면 ${index}`, score: audio.score, scoreType: '기초 오디오 지표', metrics: audio, scoreBreakdown, captions: ready.captions, ready: !ready.fallback, aspectRatio: ready.fallback ? 'source' : '9:16', previewUrl: `/media/${basename(ready.path)}`, sourcePreviewUrl: `/media/${basename(clipPath)}`, thumbnailUrl: `/media/${basename(thumbPath)}` };
+  const score = audio.score == null ? null : Math.round(audio.score * 0.7 + durationFit * 30);
+  const captionTitle = ready.captions?.[0]?.text?.replace(/\s+/g, ' ').trim().slice(0, 28);
+  const title = captionTitle || `핵심 장면 ${index}`;
+  return { id: `${projectId}-${index}`, start, end, duration, title, score, scoreType: '기초 오디오·길이 지표', metrics: audio, scoreBreakdown, captions: ready.captions, ready: !ready.fallback, aspectRatio: ready.fallback ? 'source' : '9:16', previewUrl: `/media/${basename(ready.path)}`, sourcePreviewUrl: `/media/${basename(clipPath)}`, thumbnailUrl: `/media/${basename(thumbPath)}` };
 }
 
 async function renderSegments(sourcePath, projectId, segments) {

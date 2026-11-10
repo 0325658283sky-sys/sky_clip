@@ -14,10 +14,13 @@ const types = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=
 const execFile = promisify((file, args, options, callback) => {
   const child = spawn(file, args, options);
   let stdout = ''; let stderr = '';
+  let finished = false;
+  const finish = (error, result) => { if (finished) return; finished = true; clearTimeout(timer); callback(error, result); };
+  const timer = options?.timeoutMs ? setTimeout(() => { child.kill(); finish(new Error(`Command timed out: ${file}`)); }, options.timeoutMs) : null;
   child.stdout.on('data', chunk => { stdout += chunk; });
   child.stderr.on('data', chunk => { stderr += chunk; });
-  child.on('error', callback);
-  child.on('close', code => code === 0 ? callback(null, { stdout, stderr }) : callback(Object.assign(new Error(stderr || `Command failed: ${file}`), { code, stdout, stderr })));
+  child.on('error', error => finish(error));
+  child.on('close', code => code === 0 ? finish(null, { stdout, stderr }) : finish(Object.assign(new Error(stderr || `Command failed: ${file}`), { code, stdout, stderr })));
 });
 
 await mkdir(uploadRoot, { recursive: true });
@@ -53,7 +56,7 @@ async function extractPreview(sourcePath, projectId) {
 }
 
 async function downloadYouTube(url, outputPath) {
-  await execFile('yt-dlp.exe', ['--no-playlist', '-f', 'bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/b', '--merge-output-format', 'mp4', '-o', outputPath, url], { windowsHide: true });
+  await execFile('yt-dlp.exe', ['--no-playlist', '--socket-timeout', '20', '--retries', '1', '--fragment-retries', '1', '-f', 'bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/b', '--merge-output-format', 'mp4', '-o', outputPath, url], { windowsHide: true, timeoutMs: 120000 });
   return outputPath;
 }
 

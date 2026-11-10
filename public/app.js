@@ -34,6 +34,7 @@ async function createProject() {
 window.addEventListener('hashchange', () => { state.route = location.hash.slice(1) || 'dashboard'; render(); });
 function bind() {
   document.querySelectorAll('[data-nav]').forEach(el => el.addEventListener('click', () => navigate(el.dataset.nav)));
+  const recent = document.querySelector('.recent'); if (recent) fetch('/api/projects').then(response => response.json()).then(data => { const projects = (data.projects || []).filter(project => project.status === 'completed').slice(0, 5); recent.innerHTML = '<div class="nav-label">최근 프로젝트</div>' + (projects.length ? projects.map(project => `<button class="recent-item" data-project-id="${project.id}">${project.fileName || project.title || '로컬 프로젝트'}</button>`).join('') : '<div class="muted">최근 프로젝트가 없습니다.</div>'); recent.querySelectorAll('[data-project-id]').forEach(button => button.onclick = () => { const project = projects.find(item => item.id === button.dataset.projectId); if (!project) return; state.project = project; clips.splice(0, clips.length, ...(project.clips || []).map(clip => [clip.title, `00:${String(Math.round(clip.duration || (clip.end - clip.start))).padStart(2, '0')}`, clip.score, clip.thumbnailUrl])); state.clipTitle = project.clips?.[0]?.title || project.title || '로컬 프로젝트'; navigate('results'); }); }).catch(() => {});
   document.querySelectorAll('[data-action]').forEach(el => el.addEventListener('click', async () => {
     const action = el.dataset.action;
     if (action === 'analyze') createProject();

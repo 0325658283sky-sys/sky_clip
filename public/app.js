@@ -37,7 +37,7 @@ function bind() {
   document.querySelectorAll('[data-action]').forEach(el => el.addEventListener('click', async () => {
     const action = el.dataset.action;
     if (action === 'analyze') createProject();
-    if (action === 'sample') navigate('results');
+    if (action === 'sample') { const response = await fetch('/api/projects'); const data = await response.json(); const latest = (data.projects || []).find(project => project.status === 'completed' && project.clips?.length); if (latest) { state.project = latest; clips.splice(0, clips.length, ...(latest.clips || []).map(clip => [clip.title, `00:${String(Math.round(clip.duration || (clip.end - clip.start))).padStart(2, '0')}`, clip.score, clip.thumbnailUrl])); state.clipTitle = latest.clips[0].title; navigate('results'); } else toast('분석 완료된 프로젝트가 없습니다.'); }
     if (action === 'new-project') document.querySelector('#source-input')?.focus();
     if (action === 'save') { state.saved = true; toast('편집 내용이 저장되었습니다.'); render(); }
     if (action === 'share') { const shareUrl = `${location.origin}/#results`; try { await navigator.clipboard.writeText(shareUrl); toast('프로젝트 링크를 클립보드에 복사했습니다.'); } catch { toast(shareUrl); } }
@@ -51,6 +51,7 @@ function bind() {
       const data = await response.json(); toast('MP4 렌더링이 완료되었습니다.'); window.open(data.downloadUrl, '_blank');
     }
   }));
+  if (state.route === 'results' && !state.project) fetch('/api/projects').then(response => response.json()).then(data => { const latest = (data.projects || []).find(project => project.status === 'completed' && project.clips?.length); if (latest) { state.project = latest; clips.splice(0, clips.length, ...(latest.clips || []).map(clip => [clip.title, `00:${String(Math.round(clip.duration || (clip.end - clip.start))).padStart(2, '0')}`, clip.score, clip.thumbnailUrl])); state.clipTitle = latest.clips[0].title; render(); } }).catch(() => {});
   document.querySelector('#file-input')?.addEventListener('change', event => { state.file = event.target.files[0]; render(); toast(`${state.file.name} 파일을 선택했습니다.`); });
   document.querySelectorAll('.tab').forEach(tab => tab.addEventListener('click', () => { document.querySelectorAll('.tab').forEach(item => item.classList.remove('active')); tab.classList.add('active'); }));
   if (state.route === 'results' && state.project?.clips) document.querySelectorAll('.clip-row').forEach((row, index) => { const clip = state.project.clips[index]; if (!clip) return; const thumb = row.querySelector('.clip-thumb'); if (thumb && clip.thumbnailUrl) thumb.style.backgroundImage = `url("${clip.thumbnailUrl}")`; const score = row.querySelector('.score'); if (score && clip.score == null) score.innerHTML = '<small>분석 근거 준비 중</small>'; row.onclick = () => { state.project = { ...state.project, previewUrl: clip.previewUrl }; state.clipTitle = clip.title; render(); }; });

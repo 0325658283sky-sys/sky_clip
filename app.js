@@ -140,6 +140,8 @@ $('#expandResultCaption')?.addEventListener('click',event=>{const caption=$('#re
 
 const legacyOpenResults=openResults;
 openResults=async function(){
+  const hasPlayableProject=projectState.sourceType==='sample'||Boolean(projectState.renderInput);
+  if(projectState.id&&!hasPlayableProject){showView('studio');toast('원본 영상이 아직 연결되지 않아 추천 클립을 열 수 없습니다.');return;}
   if(projectState.id){
     try{const response=await fetch(`${API_BASE}/api/projects/${projectState.id}/results`);if(response.ok){const payload=await response.json();const clips=payload.resultSet?.clips;if(Array.isArray(clips)&&clips.length){resultClips.splice(0,resultClips.length,...clips.map(clip=>({id:clip.id,title:clip.title,duration:clip.duration,score:clip.viralScore,subtitle:clip.subtitleText,reason:clip.scoreReason,start:clip.start,end:clip.end})));}}
     }catch(error){console.info('결과 API 연결 전 기본 결과를 사용합니다.')} 

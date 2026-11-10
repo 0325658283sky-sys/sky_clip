@@ -278,6 +278,13 @@ const server = createServer(async (req, res) => {
     setTimeout(() => { logProject(id, '자막 생성이 완료되었습니다.'); const current = projects.get(id); if (current) { projects.set(id, { ...current, status: 'ready', progress: 100, captions: ['자정의 도시는 조용하지만 이 작은 주방은 깨어 있습니다.', '이 국물은 무엇을 해야 하는지 정확히 압니다.', '늦은 밤 한 그릇이면 하루가 정리됩니다.'], captionCues: [{ start: 0, end: 3 }, { start: 3, end: 9 }, { start: 9, end: 16 }] }); persist(); } }, 600);
     return json(res, 202, project);
   }
+  const promptClipJob = url.pathname.match(/^\/api\/projects\/([^/]+)\/prompt-clips$/);
+  if (req.method === 'POST' && promptClipJob) {
+    const id = promptClipJob[1]; const visible = visibleProject(req, id); if (!visible) return json(res, 404, { error: '프로젝트를 찾을 수 없습니다.' });
+    let raw = ''; for await (const chunk of req) raw += chunk; const input = raw ? JSON.parse(raw) : {}; const prompt = String(input.prompt || '').trim();
+    if (!prompt) return json(res, 400, { error: '프롬프트를 입력해 주세요.' });
+    const request = { id: randomUUID(), prompt, status: 'queued', createdAt: new Date().toISOString() }; const project = { ...visible, promptClipRequests: [...(visible.promptClipRequests || []), request] }; projects.set(id, project); persist(); logProject(id, `프롬프트 클립 생성 요청을 받았습니다: ${prompt.slice(0, 80)}`); return json(res, 202, request);
+  }
   const assetsJob = url.pathname.match(/^\/api\/projects\/([^/]+)\/assets$/);
   if (req.method === 'POST' && assetsJob) {
     const id = assetsJob[1];

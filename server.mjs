@@ -60,6 +60,15 @@ async function downloadYouTube(url, outputPath) {
   return outputPath;
 }
 
+async function prepareYouTubeProject(project, sourcePath) {
+  const projectPath = join(dataRoot, `${project.id}.json`);
+  try {
+    await downloadYouTube(project.source, sourcePath);
+    project.sourceType = 'file'; project.source = sourcePath; project.fileName = 'youtube-video.mp4'; project.status = 'ready'; project.progress = 55; project.metadata = await probe(sourcePath);
+  } catch (error) { project.status = 'failed'; project.error = error.message; }
+  await writeFile(projectPath, JSON.stringify(project, null, 2));
+}
+
 async function handleApi(req, res, url) {
   if (url.pathname === '/api/health') { json(res, 200, { ok: true, service: 'skyclip', mode: 'local' }); return true; }
   if (req.method === 'GET' && url.pathname === '/api/projects') {
@@ -68,6 +77,8 @@ async function handleApi(req, res, url) {
     for (const entry of entries) if (entry.isFile() && entry.name.endsWith('.json')) { try { projects.push(JSON.parse(await readFile(join(dataRoot, entry.name), 'utf8'))); } catch {} }
     projects.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))); json(res, 200, { projects }); return true;
   }
+  const projectGet = url.pathname.match(/^\/api\/projects\/([^/]+)$/);
+  if (req.method === 'GET' && projectGet) { const project = JSON.parse(await readFile(join(dataRoot, `${projectGet[1]}.json`), 'utf8')); json(res, 200, project); return true; }
   if (req.method === 'GET' && url.pathname === '/api/templates') {
     const file = join(dataRoot, 'templates.json'); try { json(res, 200, { templates: JSON.parse(await readFile(file, 'utf8')) }); } catch { json(res, 200, { templates: [] }); } return true;
   }
@@ -86,8 +97,7 @@ async function handleApi(req, res, url) {
       const sourceUrl = String(payload.url || '').trim();
       let project = { id: projectId, sourceType: 'url', source: sourceUrl, fileName: null, status: 'needs-source', progress: 0, metadata: null, createdAt: new Date().toISOString() };
       if (/^(https?:\/\/)?(www\.)?(youtube\.com\/watch\?v=|youtu\.be\/)/i.test(sourceUrl)) {
-        const sourcePath = join(uploadRoot, `${projectId}-youtube.mp4`); await downloadYouTube(sourceUrl, sourcePath);
-        project = { ...project, sourceType: 'file', source: sourcePath, fileName: 'youtube-video.mp4', status: 'ready', metadata: await probe(sourcePath) };
+        const sourcePath = join(uploadRoot, `${projectId}-youtube.mp4`); project.status = 'downloading'; project.progress = 5; await writeFile(join(dataRoot, `${projectId}.json`), JSON.stringify(project, null, 2)); void prepareYouTubeProject(project, sourcePath); json(res, 202, project); return true;
       } else if (/^https?:\/\/.*\.(mp4|mov|webm)(\?.*)?$/i.test(sourceUrl)) {
         const remote = await fetch(sourceUrl); if (!remote.ok) throw new Error(`영상 링크를 가져오지 못했습니다. (${remote.status})`);
         const remoteBody = Buffer.from(await remote.arrayBuffer()); if (remoteBody.length > 1024 * 1024 * 1024) throw new Error('원격 영상이 1GB를 초과합니다.');

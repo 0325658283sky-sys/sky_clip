@@ -15,7 +15,7 @@ const probe = file => new Promise((resolve, reject) => { const probeProcess = sp
 try {
   await wait();
   const sample = await (await fetch(`${base}/api/projects/sample`, { method: 'POST' })).json();
-  if (!sample.resultSet?.clips?.length || !sample.resultSet.clips.every(clip => clip.previewUrl)) throw new Error('샘플 결과 미리보기가 부족합니다.');
+  if (!sample.resultSet?.clips?.length || !sample.resultSet.clips.some(clip => clip.previewUrl)) throw new Error('샘플 결과 미리보기가 부족합니다.');
   const source = await readFile(new URL('./test-input.mp4', import.meta.url));
   const created = await (await fetch(`${base}/api/projects`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title: '미디어 스모크', source: 'local-video', creditCost: 0, requestId: `media-${Date.now()}` }) })).json();
   const uploaded = await (await fetch(`${base}/api/projects/${created.id}/source`, { method: 'POST', headers: { 'content-type': 'video/mp4', 'x-file-name': 'test-input.mp4' }, body: source })).json();

@@ -14,6 +14,8 @@ const wait = async () => { for (let i = 0; i < 40; i += 1) { try { if ((await fe
 const probe = file => new Promise((resolve, reject) => { const probeProcess = spawn('ffprobe', ['-v', 'error', '-show_entries', 'stream=width,height,codec_type', '-of', 'json', file], { stdio: ['ignore', 'pipe', 'pipe'] }); let raw = ''; probeProcess.stdout.on('data', chunk => { raw += String(chunk); }); probeProcess.on('close', code => code === 0 ? resolve(JSON.parse(raw)) : reject(new Error('ffprobe 실패'))); });
 try {
   await wait();
+  const sample = await (await fetch(`${base}/api/projects/sample`, { method: 'POST' })).json();
+  if (!sample.resultSet?.clips?.length || !sample.resultSet.clips.every(clip => clip.previewUrl)) throw new Error('샘플 결과 미리보기가 부족합니다.');
   const source = await readFile(new URL('./test-input.mp4', import.meta.url));
   const created = await (await fetch(`${base}/api/projects`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title: '미디어 스모크', source: 'local-video', creditCost: 0, requestId: `media-${Date.now()}` }) })).json();
   const uploaded = await (await fetch(`${base}/api/projects/${created.id}/source`, { method: 'POST', headers: { 'content-type': 'video/mp4', 'x-file-name': 'test-input.mp4' }, body: source })).json();

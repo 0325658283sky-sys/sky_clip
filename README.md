@@ -78,6 +78,8 @@ Docker가 설치된 환경에서는 `.env`를 만든 뒤 `docker compose up -d -
 
 상세 배포 순서는 `DEPLOYMENT_RUNBOOK.md`를 따릅니다.
 
+`main`에 푸시하거나 PR을 만들면 GitHub Actions가 Node 문법 검사와 핵심 QA를 자동 실행합니다.
+
 자막 편집, 컷 저장, 프로젝트/자막/내보내기 API, 실제 1080x1920 클립 파일, FFmpeg 렌더러를 자동 점검합니다.
 
 ## 다음 구현 순서

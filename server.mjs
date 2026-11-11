@@ -168,7 +168,7 @@ async function handleApi(req, res, url) {
   if (req.method === 'GET' && url.pathname === '/api/projects') {
     const entries = await (await import('node:fs/promises')).readdir(dataRoot, { withFileTypes: true });
     const projects = [];
-    for (const entry of entries) if (entry.isFile() && entry.name.endsWith('.json')) { try { projects.push(JSON.parse(await readFile(join(dataRoot, entry.name), 'utf8'))); } catch {} }
+    for (const entry of entries) if (entry.isFile() && /^[0-9a-f-]{36}\.json$/i.test(entry.name)) { try { const project = JSON.parse(await readFile(join(dataRoot, entry.name), 'utf8')); if (project.id && project.sourceType) projects.push(project); } catch {} }
     projects.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))); json(res, 200, { projects }); return true;
   }
   const projectGet = url.pathname.match(/^\/api\/projects\/([^/]+)$/);

@@ -72,7 +72,25 @@ async function makeReadyClip(clipPath, projectId, index, duration) {
   return { path: readyPath, captions };
 }
 
-async function extractClip(sourcePath, projectId, index, start, end) {
+function buildHighlightSignals(captions, duration, selectionMeta = {}) {
+  const text = captions.map(item => String(item.text || '').replace(/\s+/g, ' ').trim()).filter(Boolean).join(' ');
+  const words = text.split(/\s+/).filter(Boolean); const uniqueWords = new Set(words.map(word => word.replace(/[^\p{L}\p{N}]/gu, ''))).size;
+  const lexicalDiversity = words.length ? Math.min(1, uniqueWords / words.length) : 0;
+  const captionCoverage = captions.length ? Math.min(1, captions.reduce((sum, item) => sum + Math.max(0, Number(item.end) - Number(item.start)), 0) / Math.max(0.5, duration)) : 0;
+  const sceneScore = selectionMeta.sceneAligned ? 1 : 0.35;
+  const reactionScore = Math.min(1, (text.match(/[!?]|(와|진짜|대박|미쳤|감동|웃|놀랍)/g) || []).length / 3);
+  return { lexicalDiversity: Number(lexicalDiversity.toFixed(3)), captionCoverage: Number(captionCoverage.toFixed(3)), sceneScore, reactionScore, selectionReason: selectionMeta.sceneAligned ? '장면 변화와 음성 반응이 함께 감지된 구간' : '음성·자막·길이 지표가 안정적인 구간' };
+}
+
+function buildClipTitle(captions, index) {
+  const text = captions.map(item => String(item.text || '').replace(/\s+/g, ' ').trim()).filter(Boolean).join(' ');
+  if (!text) return `핵심 장면 ${index}`;
+  const cleaned = text.replace(/[.!?。！？]+/g, ' ').replace(/\s+/g, ' ').trim();
+  const words = cleaned.split(' ').filter(Boolean); const candidate = words.slice(0, 8).join(' ');
+  return `${candidate.slice(0, 32)}${candidate.length > 32 ? '…' : ''}`;
+}
+
+async function extractClip(sourcePath, projectId, index, start, end, selectionMeta = {}) {
   const clipPath = join(uploadRoot, `${projectId}-clip-${index}.mp4`); const thumbPath = join(uploadRoot, `${projectId}-clip-${index}.jpg`);
   const duration = Math.max(0.5, end - start);
   await execFile('ffmpeg', ['-y', '-ss', String(start), '-i', sourcePath, '-t', String(duration), '-vf', 'scale=720:-2', '-c:v', 'libx264', '-preset', 'veryfast', '-c:a', 'aac', '-movflags', '+faststart', clipPath], { windowsHide: true, timeoutMs: 180000 });
@@ -81,12 +99,12 @@ async function extractClip(sourcePath, projectId, index, start, end) {
   catch { ready = { path: clipPath, captions: [], fallback: true }; }
   await execFile('ffmpeg', ['-y', '-i', ready.path, '-frames:v', '1', '-q:v', '3', thumbPath], { windowsHide: true, timeoutMs: 60000 });
   const audio = await measureAudio(clipPath, duration);
-  const durationFit = Math.max(0, Math.min(1, 1 - Math.abs(duration - 22) / 22));
-  const scoreBreakdown = { speechCoverage: audio.speechCoverage, silenceEvents: audio.silenceEvents, durationFit: Number(durationFit.toFixed(3)), hook: Math.round((audio.speechCoverage * 0.65 + durationFit * 0.35) * 100), topic: Math.round(durationFit * 100), flow: Math.round((1 - Math.min(1, audio.silenceEvents / 8)) * 100), immersion: Math.round(audio.score == null ? 0 : audio.score * 100), ending: Math.round((audio.speechCoverage * 0.5 + durationFit * 0.5) * 100), evidence: ['실제 오디오 무음 구간', '클립 길이', '음성 커버리지'] };
-  const score = audio.score == null ? null : Math.round(audio.score * 0.7 + durationFit * 30);
-  const captionTitle = ready.captions?.[0]?.text?.replace(/\s+/g, ' ').trim().slice(0, 28);
-  const title = captionTitle || `핵심 장면 ${index}`;
-  return { id: `${projectId}-${index}`, start, end, duration, title, score, scoreType: '기초 오디오·길이 지표', metrics: audio, scoreBreakdown, captions: ready.captions, ready: !ready.fallback, aspectRatio: ready.fallback ? 'source' : '9:16', previewUrl: `/media/${basename(ready.path)}`, sourcePreviewUrl: `/media/${basename(clipPath)}`, thumbnailUrl: `/media/${basename(thumbPath)}` };
+  const durationFit = Math.max(0, Math.min(1, 1 - Math.abs(duration - 22) / 22)); const signals = buildHighlightSignals(ready.captions || [], duration, selectionMeta); const speech = audio.speechCoverage == null ? 0 : audio.speechCoverage;
+  const scoreValue = speech * 0.28 + durationFit * 0.16 + signals.sceneScore * 0.2 + signals.captionCoverage * 0.16 + signals.lexicalDiversity * 0.1 + signals.reactionScore * 0.1;
+  const scoreBreakdown = { speechCoverage: audio.speechCoverage, silenceEvents: audio.silenceEvents, durationFit: Number(durationFit.toFixed(3)), hook: Math.round((speech * 0.45 + signals.reactionScore * 0.25 + signals.sceneScore * 0.3) * 100), topic: Math.round((signals.captionCoverage * 0.55 + signals.lexicalDiversity * 0.45) * 100), flow: Math.round((1 - Math.min(1, (audio.silenceEvents || 0) / 8)) * 100), immersion: Math.round((speech * 0.5 + signals.sceneScore * 0.25 + signals.reactionScore * 0.25) * 100), ending: Math.round((durationFit * 0.55 + signals.captionCoverage * 0.45) * 100), evidence: ['실제 오디오 무음 구간', 'FFmpeg 장면 변화 후보', '자막 커버리지·어휘 다양성', signals.reactionScore > 0 ? '음성 반응 표현' : '음성 반응 표현 미검출'], signals };
+  const score = audio.score == null ? null : Math.round(scoreValue * 100);
+  const title = buildClipTitle(ready.captions || [], index);
+  return { id: `${projectId}-${index}`, start, end, duration, title, score, scoreType: '음성·장면·자막 결합 휴리스틱', metrics: { ...audio, ...signals }, scoreBreakdown, captions: ready.captions, ready: !ready.fallback, aspectRatio: ready.fallback ? 'source' : '9:16', previewUrl: `/media/${basename(ready.path)}`, sourcePreviewUrl: `/media/${basename(clipPath)}`, thumbnailUrl: `/media/${basename(thumbPath)}` };
 }
 
 async function renderSegments(sourcePath, projectId, segments) {
@@ -199,7 +217,7 @@ async function handleApi(req, res, url) {
     project.clips = [];
     for (let index = 0; index < starts.length; index += 1) {
       const start = starts[index];
-      if (window > 0.5) project.clips.push(await extractClip(project.source, project.id, index + 1, start, Math.min(total, start + window)));
+      if (window > 0.5) project.clips.push(await extractClip(project.source, project.id, index + 1, start, Math.min(total, start + window), { sceneAligned: sceneStarts.some(candidate => Math.abs(candidate - start) < 0.05) }));
       project.progress = Math.min(92, 25 + Math.round(((index + 1) / starts.length) * 67)); project.updatedAt = new Date().toISOString(); await writeFile(projectPath, JSON.stringify(project, null, 2));
     }
     if (project.clips[0]) { project.previewUrl = project.clips[0].previewUrl; project.previewPath = join(uploadRoot, basename(project.clips[0].previewUrl)); project.captions = project.clips[0].captions || []; }

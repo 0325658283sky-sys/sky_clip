@@ -8,9 +8,14 @@ await request(`/api/projects/${project.id}/select`, { method: 'POST', headers: {
 const feedback = await request(`/api/projects/${project.id}/clip-feedback`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ clipId: clip.id, type: 'favorite' }) });
 const captions = (clip.captions || []).slice(0, 2).map(item => ({ ...item, text: item.text }));
 await request(`/api/projects/${project.id}/captions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ captions }) });
-await request(`/api/projects/${project.id}/edit`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title: clip.title, segments: [{ start: 0, end: Math.min(3, clip.duration || 3) }], layers: [{ id: 'e2e-title', type: 'text', role: 'title', text: clip.title, position: 'top', fontSize: 42, color: '#ffffff', shadow: true }], captionStyle: { position: 'bottom', fontSize: 28, color: '#ffffff' }, tool: 'e2e' }) });
+const template = await request('/api/templates', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'E2E 검증 템플릿', aspectRatio: '9:16', captionStyle: { position: 'bottom', fontSize: 30, color: '#ffffff' } }) });
+const edit = { title: clip.title, segments: [{ start: 0, end: Math.min(3, clip.duration || 3) }], layers: [{ id: 'e2e-title', type: 'text', role: 'title', text: clip.title, position: 'top', fontSize: 42, color: '#ffffff', shadow: true }], captionStyle: { position: 'bottom', fontSize: 28, color: '#ffffff' }, templateId: template.id, effects: ['contrast'], tool: 'e2e' };
+await request(`/api/projects/${project.id}/edit`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(edit) });
+const reloaded = await request(`/api/projects/${project.id}`);
+const persistedEdit = reloaded.edit?.templateId === template.id && reloaded.edit?.segments?.length === 1 && reloaded.edit?.layers?.length === 1;
+if (!persistedEdit) throw new Error('편집 상태 재진입 검증에 실패했습니다.');
 const exported = await request(`/api/projects/${project.id}/export`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ burnCaptions: true }) });
 const download = await fetch(new URL(exported.downloadUrl, base));
-const result = { projectId: project.id, selectedClipId: clip.id, feedback: feedback.feedback, exportUrl: exported.downloadUrl, downloadStatus: download.status, downloadBytes: Number(download.headers.get('content-length') || 0) };
+const result = { projectId: project.id, selectedClipId: clip.id, feedback: feedback.feedback, persistedEdit, templateId: template.id, exportUrl: exported.downloadUrl, downloadStatus: download.status, downloadBytes: Number(download.headers.get('content-length') || 0) };
 console.log(JSON.stringify(result, null, 2));
 if (!download.ok || result.downloadBytes <= 0) process.exitCode = 1;

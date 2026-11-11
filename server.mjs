@@ -283,6 +283,7 @@ async function handleApi(req, res, url) {
     const output = join(uploadRoot, `${project.id}-export.mp4`); project.exportProgress = 25; await writeFile(projectPath, JSON.stringify(project, null, 2));
     const start = hasSegmentSequence ? 0 : Math.max(0, Number(project.edit?.start ?? 0));
     const duration = hasSegmentSequence ? null : project.edit?.end ? Math.max(0.1, Number(project.edit.end) - start) : null;
+    const renderDuration = duration || (await probe(source)).duration || null;
     if (exportOptions.templateId) {
       const templateFile = join(dataRoot, 'templates.json'); let templates = []; try { templates = JSON.parse(await readFile(templateFile, 'utf8')); } catch {}
       const template = templates.find(item => item.id === exportOptions.templateId); if (template) exportOptions.captionStyle = exportOptions.captionStyle || template.captionStyle;
@@ -298,7 +299,7 @@ async function handleApi(req, res, url) {
     for (const asset of visualAssets) { if (asset.kind === 'video') args.push('-stream_loop', '-1'); if (asset.kind === 'image') args.push('-loop', '1'); args.push('-i', asset.path); visualInputIndices.push(nextInput++); }
     let filter = project.edit?.aspectRatio === '1:1' ? 'scale=720:720:force_original_aspect_ratio=decrease,pad=720:720:(ow-iw)/2:(oh-ih)/2' : 'scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2';
     if (project.edit?.hideOriginalCaptions) filter = `${filter},drawbox=x=0:y=ih*0.72:w=iw:h=ih*0.28:color=black@0.82:t=fill`;
-    if (duration) args.push('-t', String(duration));
+    if (renderDuration) args.push('-t', String(renderDuration));
     if (project.captionPath) { captionInputIndex = nextInput++; args.push('-f', 'webvtt', '-i', project.captionPath); }
     if (hasAudioAsset) { args.push('-stream_loop', '-1', '-i', audioAsset.path); audioInputIndex = nextInput++; }
     if (exportOptions.burnCaptions && project.captionPath) { const style = project.edit?.captionStyle || {}; const fontSize = Math.max(12, Math.min(72, Number(style.fontSize) || 28)); const alignment = style.position === 'top' ? 8 : style.position === 'middle' ? 5 : 2; const rawColor = String(style.color || '#ffffff').replace('#', '').padEnd(6, 'f').slice(0, 6); const assColor = `&H00${rawColor.slice(4, 6)}${rawColor.slice(2, 4)}${rawColor.slice(0, 2)}`; if (style.animation === 'fade') { const assPath = join(uploadRoot, `${project.id}-animated.ass`); await writeFile(assPath, buildAnimatedAss(project.captions || [], { fontSize, alignment, assColor }), 'utf8'); const captionFile = assPath.replaceAll('\\', '/').replaceAll(':', '\\:'); filter = `subtitles=filename='${captionFile}',${filter}`; } else { const captionFile = project.captionPath.replaceAll('\\', '/').replaceAll(':', '\\:'); filter = `subtitles=filename='${captionFile}':force_style='FontSize=${fontSize},PrimaryColour=${assColor},Alignment=${alignment},Outline=2,MarginV=36',${filter}`; } }
@@ -307,7 +308,7 @@ async function handleApi(req, res, url) {
     for (const effect of (project.edit?.effects || [])) { if (effect === 'grayscale') filter += ',hue=s=0'; if (effect === 'warm') filter += ',colorbalance=rs=.08:gs=.03:bs=-.04'; if (effect === 'contrast') filter += ',eq=contrast=1.18:brightness=0.02'; if (effect === 'fade-in') filter += ',fade=t=in:st=0:d=0.5'; if (effect === 'fade-out' && duration) filter += `,fade=t=out:st=${Math.max(0.1, duration - 0.5)}:d=0.5`; }
     if (hasVisualOverlay) { const chains = [`[0:v]${filter}[base0]`]; let base = '[base0]'; for (const [index, inputIndex] of visualInputIndices.entries()) { const asset = visualAssets[index]; const assetLabel = `[asset${index}]`; const nextBase = `[base${index + 1}]`; const x = index % 2 === 0 ? 'W-w-24' : '24'; const y = index < 2 ? 'H-h-24' : '24'; chains.push(`[${inputIndex}:v]format=rgba,colorchannelmixer=aa=${Math.max(0.45, 0.72 - index * 0.08).toFixed(2)}${assetLabel}`); chains.push(`${base}${assetLabel}overlay=${x}:${y}${nextBase}`); base = nextBase; } args.push('-filter_complex', chains.join(';'), '-map', base); } else { args.push('-vf', filter, '-map', '0:v:0'); }
     if (hasAudioAsset) args.push('-map', `${audioInputIndex}:a:0`); else args.push('-map', '0:a?');
-    if (hasVisualOverlay || hasAudioAsset) args.push('-shortest');
+    if ((hasVisualOverlay || hasAudioAsset) && captionInputIndex === null) args.push('-shortest');
     if (captionInputIndex !== null) args.push('-map', `${captionInputIndex}:0`, '-c:s', 'mov_text');
     args.push('-c:v', 'libx264', '-preset', 'veryfast', '-c:a', 'aac', '-movflags', '+faststart', output);
     project.edit = { ...(project.edit || {}), assetId: exportOptions.assetId || project.edit?.assetId || null };

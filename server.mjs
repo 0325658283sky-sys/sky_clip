@@ -55,6 +55,14 @@ async function extractPreview(sourcePath, projectId) {
   } catch { return null; }
 }
 
+async function detectSceneStarts(sourcePath, total, window) {
+  try {
+    const result = await execFile('ffmpeg', ['-hide_banner', '-i', sourcePath, '-vf', "select='gt(scene,0.35)',showinfo", '-an', '-f', 'null', '-'], { windowsHide: true, timeoutMs: 300000 });
+    const starts = [...result.stderr.matchAll(/pts_time:([0-9.]+)/g)].map(match => Number(match[1])).filter(value => Number.isFinite(value) && value >= 0 && value <= Math.max(0, total - window));
+    return [...new Set(starts.map(value => Number(value.toFixed(2))))];
+  } catch { return []; }
+}
+
 async function makeReadyClip(clipPath, projectId, index, duration) {
   const vttPath = join(uploadRoot, `${projectId}-clip-${index}.vtt`); const readyPath = join(uploadRoot, `${projectId}-ready-${index}.mp4`); let captions = [];
   try { const result = await execFile('python', [join(fileURLToPath(new URL('.', import.meta.url)), 'scripts', 'stt.py'), clipPath, vttPath], { windowsHide: true, timeoutMs: 300000 }); const output = JSON.parse(result.stdout.trim()); captions = output.captions || []; } catch {}
@@ -179,7 +187,10 @@ async function handleApi(req, res, url) {
     if (project.sourceType === 'file') { project.previewPath = await extractPreview(project.source, project.id); project.previewUrl = project.previewPath ? `/media/${basename(project.previewPath)}` : null; }
     const total = Number(project.metadata?.duration || 15);
     const window = Math.min(22, total);
-    const starts = [...new Set([0, total * 0.2, total * 0.4, total * 0.6, total * 0.8].map(value => Math.max(0, Math.min(Math.max(0, total - window), value))))];
+    const sceneStarts = await detectSceneStarts(project.source, total, window);
+    const fallbackStarts = [0, total * 0.2, total * 0.4, total * 0.6, total * 0.8].map(value => Math.max(0, Math.min(Math.max(0, total - window), value)));
+    const starts = [...new Set([...sceneStarts.slice(0, 5), ...fallbackStarts].map(value => Number(value.toFixed(2))))].sort((a, b) => a - b).slice(0, 5);
+    project.analysisEvidence = { selector: sceneStarts.length ? 'ffmpeg-scene-change-plus-uniform-fallback' : 'uniform-fallback', sceneCandidates: sceneStarts.length, windowSeconds: window };
     project.clips = [];
     for (let index = 0; index < starts.length; index += 1) {
       const start = starts[index];
@@ -273,7 +284,7 @@ async function handleApi(req, res, url) {
   const sttMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/stt$/);
   if (req.method === 'POST' && sttMatch) {
     const projectPath = join(dataRoot, `${sttMatch[1]}.json`); const project = JSON.parse(await readFile(projectPath, 'utf8'));
-    const source = project.previewPath || project.source; if (!source) throw new Error('자막을 생성할 영상이 없습니다.');
+    const source = project.source || project.previewPath; if (!source) throw new Error('자막을 생성할 영상이 없습니다.');
     const captionPath = join(uploadRoot, `${project.id}-stt.vtt`);
     const scriptPath = join(fileURLToPath(new URL('.', import.meta.url)), 'scripts', 'stt.py');
     const result = await execFile('python', [scriptPath, source, captionPath], { windowsHide: true, timeoutMs: 900000 });

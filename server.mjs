@@ -305,7 +305,8 @@ async function handleApi(req, res, url) {
     const hasVisualOverlay = visualAssets.length > 0; const hasAudioAsset = Boolean(audioAsset?.path);
     let nextInput = 1; const visualInputIndices = []; let audioInputIndex = null; let captionInputIndex = null;
     for (const layer of visualAssets) { if (layer.asset.kind === 'video') args.push('-stream_loop', '-1'); if (layer.asset.kind === 'image') args.push('-loop', '1'); args.push('-i', layer.asset.path); visualInputIndices.push(nextInput++); }
-    let filter = project.edit?.aspectRatio === '1:1' ? 'scale=720:720:force_original_aspect_ratio=decrease,pad=720:720:(ow-iw)/2:(oh-ih)/2' : 'scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2';
+    const outputAspectRatio = project.edit?.aspectRatio === '1:1' ? '1:1' : project.edit?.aspectRatio === '4:3' ? '4:3' : '9:16';
+    let filter = outputAspectRatio === '1:1' ? 'scale=720:720:force_original_aspect_ratio=decrease,pad=720:720:(ow-iw)/2:(oh-ih)/2' : outputAspectRatio === '4:3' ? 'scale=960:720:force_original_aspect_ratio=decrease,pad=960:720:(ow-iw)/2:(oh-ih)/2' : 'scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2';
     if (project.edit?.hideOriginalCaptions) filter = `${filter},drawbox=x=0:y=ih*0.72:w=iw:h=ih*0.28:color=black@0.82:t=fill`;
     if (project.captionPath && !captionsHidden) { captionInputIndex = nextInput++; args.push('-f', 'webvtt', '-i', project.captionPath); }
     if (hasAudioAsset) { args.push('-stream_loop', '-1', '-i', audioAsset.path); audioInputIndex = nextInput++; }
@@ -321,7 +322,7 @@ async function handleApi(req, res, url) {
     args.push('-c:v', 'libx264', '-preset', 'veryfast', '-c:a', 'aac', '-movflags', '+faststart', output);
     project.edit = { ...(project.edit || {}), assetId: exportOptions.assetId || project.edit?.assetId || null };
     try { await execFile('ffmpeg', args, { windowsHide: true, timeoutMs: 300000 }); } catch (error) { project.exportStatus = 'failed'; project.exportProgress = 0; project.exportError = error.message; await writeFile(projectPath, JSON.stringify(project, null, 2)); throw error; }
-    const exportMetadata = await probe(output); const expectedSize = project.edit?.aspectRatio === '1:1' ? [720, 720] : [720, 1280]; if (!exportMetadata.duration || exportMetadata.width !== expectedSize[0] || exportMetadata.height !== expectedSize[1]) { project.exportStatus = 'failed'; project.exportProgress = 0; project.exportError = `내보내기 검증 실패: ${exportMetadata.width || 0}x${exportMetadata.height || 0}, ${exportMetadata.duration || 0}초`; await writeFile(projectPath, JSON.stringify(project, null, 2)); json(res, 422, { ok: false, error: project.exportError, metadata: exportMetadata }); return true; }
+    const exportMetadata = await probe(output); const expectedSize = project.edit?.aspectRatio === '1:1' ? [720, 720] : project.edit?.aspectRatio === '4:3' ? [960, 720] : [720, 1280]; if (!exportMetadata.duration || exportMetadata.width !== expectedSize[0] || exportMetadata.height !== expectedSize[1]) { project.exportStatus = 'failed'; project.exportProgress = 0; project.exportError = `내보내기 검증 실패: ${exportMetadata.width || 0}x${exportMetadata.height || 0}, ${exportMetadata.duration || 0}초`; await writeFile(projectPath, JSON.stringify(project, null, 2)); json(res, 422, { ok: false, error: project.exportError, metadata: exportMetadata }); return true; }
     project.exportPath = output; project.exportUrl = `/media/${basename(output)}`; project.exportMetadata = exportMetadata; project.exportStatus = 'completed'; project.exportProgress = 100;
     await writeFile(projectPath, JSON.stringify(project, null, 2)); json(res, 200, { ok: true, downloadUrl: project.exportUrl }); return true;
   }

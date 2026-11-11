@@ -60,6 +60,7 @@ button { cursor: pointer; }
 .timeline-segment { position:absolute; top:3px; height:21px; border:1px solid #6946df; border-radius:4px; background:#8a6bedcc; color:#fff; font-size:9px; z-index:2; }
 .canvas-title-layer { pointer-events:auto; cursor:grab; user-select:none; }.canvas-title-layer:active { cursor:grabbing; }
 .canvas-text-layer { position:absolute; left:8%; right:8%; z-index:2; text-align:center; pointer-events:auto; cursor:grab; user-select:none; }.selected-layer { outline:2px solid #8b68ef; outline-offset:3px; }
+.editor-canvas[data-aspect-ratio="4:3"] { width:min(520px,70%); height:min(54vh,390px); }
 
 /* Dashboard: single working surface, not a card mosaic. */
 .dashboard-page { max-width:1240px; padding-top:42px; }

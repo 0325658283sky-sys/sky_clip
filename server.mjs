@@ -274,7 +274,7 @@ async function handleApi(req, res, url) {
     if (project.captionPath) { captionInputIndex = nextInput++; args.push('-f', 'webvtt', '-i', project.captionPath); }
     if (hasAudioAsset) { args.push('-stream_loop', '-1', '-i', overlayAsset.path); audioInputIndex = nextInput++; }
     if (exportOptions.burnCaptions && project.captionPath) { const captionFile = project.captionPath.replaceAll('\\', '/').replaceAll(':', '\\:'); const style = project.edit?.captionStyle || {}; const fontSize = Math.max(12, Math.min(72, Number(style.fontSize) || 28)); const alignment = style.position === 'top' ? 8 : style.position === 'middle' ? 5 : 2; const rawColor = String(style.color || '#ffffff').replace('#', '').padEnd(6, 'f').slice(0, 6); const assColor = `&H00${rawColor.slice(4, 6)}${rawColor.slice(2, 4)}${rawColor.slice(0, 2)}`; filter = `subtitles=filename='${captionFile}':force_style='FontSize=${fontSize},PrimaryColour=${assColor},Alignment=${alignment},Outline=2,MarginV=36',${filter}`; }
-    for (const layer of (project.edit?.layers || [])) if (layer.type === 'text' && layer.text) { const text = escapeDrawtext(layer.text); const size = Math.max(12, Math.min(120, Number(layer.fontSize) || 32)); const y = layer.position === 'bottom' ? 'h-text_h-80' : layer.position === 'middle' ? '(h-text_h)/2' : '80'; const shadow = layer.shadow ? ':shadowcolor=black@0.65:shadowx=2:shadowy=2' : ''; const border = layer.outline || 'black@0.7'; const box = layer.background && layer.background !== 'transparent' ? `:box=1:boxcolor=${layer.background}@0.72:boxborderw=12` : ''; filter = `${filter},drawtext=fontfile='C\\:/Windows/Fonts/arial.ttf':text='${text}':fontcolor=${layer.color || 'white'}:fontsize=${size}:borderw=2:bordercolor=${border}${shadow}${box}:x=(w-text_w)/2:y=${y}`; }
+    for (const layer of (project.edit?.layers || [])) if (layer.type === 'text' && layer.text) { const text = escapeDrawtext(layer.text); const size = Math.max(12, Math.min(120, Number(layer.fontSize) || 32)); const y = layer.position === 'bottom' ? 'h-text_h-80' : layer.position === 'middle' ? '(h-text_h)/2' : '80'; const x = layer.align === 'left' ? '80' : layer.align === 'right' ? 'w-text_w-80' : '(w-text_w)/2'; const shadow = layer.shadow ? ':shadowcolor=black@0.65:shadowx=2:shadowy=2' : ''; const border = layer.outline || 'black@0.7'; const box = layer.background && layer.background !== 'transparent' ? `:box=1:boxcolor=${layer.background}@0.72:boxborderw=12` : ''; filter = `${filter},drawtext=fontfile='C\\:/Windows/Fonts/arial.ttf':text='${text}':fontcolor=${layer.color || 'white'}:fontsize=${size}:borderw=2:bordercolor=${border}${shadow}${box}:x=${x}:y=${y}`; }
     for (const effect of (project.edit?.effects || [])) { if (effect === 'grayscale') filter += ',hue=s=0'; if (effect === 'warm') filter += ',colorbalance=rs=.08:gs=.03:bs=-.04'; if (effect === 'contrast') filter += ',eq=contrast=1.18:brightness=0.02'; if (effect === 'fade-in') filter += ',fade=t=in:st=0:d=0.5'; if (effect === 'fade-out' && duration) filter += `,fade=t=out:st=${Math.max(0.1, duration - 0.5)}:d=0.5`; }
     if (hasVisualOverlay) { args.push('-filter_complex', `[0:v]${filter}[base];[${visualInputIndex}:v]format=rgba,colorchannelmixer=aa=0.65[asset];[base][asset]overlay=W-w-24:H-h-24[vout]`, '-map', '[vout]'); } else { args.push('-vf', filter, '-map', '0:v:0'); }
     if (hasAudioAsset) args.push('-map', `${audioInputIndex}:a:0`); else args.push('-map', '0:a?');
@@ -307,7 +307,7 @@ async function handleApi(req, res, url) {
   if (req.method === 'POST' && captionMatch) {
     const projectPath = join(dataRoot, `${captionMatch[1]}.json`); const project = JSON.parse(await readFile(projectPath, 'utf8'));
     const payload = JSON.parse((await readBody(req, 2 * 1024 * 1024)).toString('utf8'));
-    const captions = Array.isArray(payload.captions) ? payload.captions.map(item => ({ start: Number(item.start) || 0, end: Number(item.end) || 0, text: String(item.text || '').slice(0, 500) })) : [];
+    const captions = Array.isArray(payload.captions) ? payload.captions.map(item => ({ start: Number(item.start) || 0, end: Number(item.end) || 0, text: String(item.text || '').slice(0, 500), words: Array.isArray(item.words) ? item.words.map(word => ({ start: Number(word.start) || 0, end: Number(word.end) || 0, text: String(word.text || '').slice(0, 100) })) : [] })) : [];
     const vtt = ['WEBVTT', '', ...captions.flatMap((item, index) => [`${index + 1}`, `${toVttTime(item.start)} --> ${toVttTime(item.end)}`, item.text, ''])].join('\n');
     const captionPath = join(uploadRoot, `${project.id}.vtt`); await writeFile(captionPath, vtt, 'utf8');
     project.captions = captions; project.captionPath = captionPath; project.captionUrl = `/media/${basename(captionPath)}`;
@@ -316,13 +316,15 @@ async function handleApi(req, res, url) {
   const sttMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/stt$/);
   if (req.method === 'POST' && sttMatch) {
     const projectPath = join(dataRoot, `${sttMatch[1]}.json`); const project = JSON.parse(await readFile(projectPath, 'utf8'));
+    let sttOptions = {}; try { const body = await readBody(req, 256 * 1024); if (body.length) sttOptions = JSON.parse(body.toString('utf8')); } catch {}
     const selectedClip = project.clips?.find(clip => clip.id === project.selectedClipId);
     const selectedClipSource = selectedClip?.previewUrl ? join(uploadRoot, basename(selectedClip.previewUrl)) : null;
     const source = selectedClipSource || project.source || project.previewPath;
     if (!source) throw new Error('자막을 생성할 영상이 없습니다.');
     const captionPath = join(uploadRoot, `${project.id}-stt.vtt`);
     const scriptPath = join(fileURLToPath(new URL('.', import.meta.url)), 'scripts', 'stt.py');
-    const result = await execFile('python', [scriptPath, source, captionPath], { windowsHide: true, timeoutMs: 900000 });
+    const model = ['tiny', 'base', 'small', 'medium'].includes(sttOptions.model) ? sttOptions.model : undefined;
+    const result = await execFile('python', [scriptPath, source, captionPath, ...(model ? [model] : [])], { windowsHide: true, timeoutMs: 900000 });
     const output = JSON.parse(result.stdout.trim()); if (!output.ok) throw new Error(output.error || 'STT 자막 생성에 실패했습니다.');
     const generatedCaptions = output.captions || [];
     if (generatedCaptions.length) { project.captions = generatedCaptions; project.captionPath = captionPath; project.captionUrl = `/media/${basename(captionPath)}`; }

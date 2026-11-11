@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node server.mjs",
     "test:quality": "node scripts/highlight-quality.mjs",
-    "test:release": "npm run test:quality && npm run test:e2e && npm run test:acceptance && node scripts/verify-local.mjs test-e2e.mp4",
+    "test:full-flow": "node scripts/full-flow-e2e.mjs",
+    "test:release": "npm run test:quality && npm run test:full-flow && npm run test:e2e && npm run test:acceptance && node scripts/verify-local.mjs test-e2e.mp4",
     "test:acceptance": "node scripts/acceptance.mjs",
     "test:export": "node scripts/export-check.mjs",
     "test:e2e": "node scripts/e2e.mjs"

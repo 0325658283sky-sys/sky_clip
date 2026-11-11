@@ -1,3 +1,4 @@
 .skyclip-data/
 node_modules/
 test-e2e.mp4
+.rea-chrome-profile/

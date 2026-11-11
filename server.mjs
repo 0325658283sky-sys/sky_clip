@@ -201,7 +201,7 @@ async function handleApi(req, res, url) {
   }
   if (req.method === 'POST' && url.pathname === '/api/templates') {
     const file = join(dataRoot, 'templates.json'); let templates = []; try { templates = JSON.parse(await readFile(file, 'utf8')); } catch {}
-    const payload = JSON.parse((await readBody(req, 1024 * 1024)).toString('utf8')); const template = { id: randomUUID(), name: String(payload.name || '새 템플릿'), aspectRatio: payload.aspectRatio || '9:16', captionStyle: payload.captionStyle || {}, createdAt: new Date().toISOString() };
+    const payload = JSON.parse((await readBody(req, 1024 * 1024)).toString('utf8')); const template = { id: randomUUID(), name: String(payload.name || '새 템플릿').slice(0, 80), aspectRatio: ['9:16', '1:1', '4:3'].includes(payload.aspectRatio) ? payload.aspectRatio : '9:16', captionStyle: payload.captionStyle && typeof payload.captionStyle === 'object' ? payload.captionStyle : {}, layers: Array.isArray(payload.layers) ? payload.layers.slice(0, 20) : [], effects: Array.isArray(payload.effects) ? payload.effects.filter(item => ['grayscale', 'warm', 'contrast', 'fade-in', 'fade-out'].includes(item)).slice(0, 8) : [], createdAt: new Date().toISOString() };
     templates.push(template); await writeFile(file, JSON.stringify(templates, null, 2)); json(res, 201, template); return true;
   }
   if (req.method === 'POST' && url.pathname === '/api/assets') {
@@ -305,8 +305,7 @@ async function handleApi(req, res, url) {
     const renderDuration = duration || (await probe(source)).duration || null;
     if (exportOptions.templateId) {
       const templateFile = join(dataRoot, 'templates.json'); let templates = []; try { templates = JSON.parse(await readFile(templateFile, 'utf8')); } catch {}
-      const template = templates.find(item => item.id === exportOptions.templateId); if (template) exportOptions.captionStyle = exportOptions.captionStyle || template.captionStyle;
-      project.edit = { ...(project.edit || {}), templateId: exportOptions.templateId };
+      const template = templates.find(item => item.id === exportOptions.templateId); if (template) { exportOptions.captionStyle = exportOptions.captionStyle || template.captionStyle; project.edit = { ...(project.edit || {}), templateId: exportOptions.templateId, aspectRatio: template.aspectRatio || project.edit?.aspectRatio, captionStyle: exportOptions.captionStyle || project.edit?.captionStyle, layers: template.layers?.length ? template.layers : project.edit?.layers, effects: template.effects?.length ? template.effects : project.edit?.effects }; } else project.edit = { ...(project.edit || {}), templateId: exportOptions.templateId };
     }
     if (exportOptions.captionStyle) project.edit = { ...(project.edit || {}), captionStyle: exportOptions.captionStyle };
     const args = ['-y', '-ss', String(start), '-i', source];
@@ -357,6 +356,7 @@ async function handleApi(req, res, url) {
     if (typeof payload.title === 'string' && payload.title.trim()) project.title = payload.title.trim();
     await writeFile(projectPath, JSON.stringify(project, null, 2)); json(res, 200, { ok: true, edit: project.edit }); return true;
   }
+  if (req.method === 'GET' && url.pathname === '/api/ai/providers') { json(res, 200, { translation: { configured: Boolean(process.env.SKYCLIP_TRANSLATION_URL), requiredEnv: 'SKYCLIP_TRANSLATION_URL' }, media: { configured: Boolean(process.env.SKYCLIP_MEDIA_API_URL), requiredEnv: 'SKYCLIP_MEDIA_API_URL' } }); return true; }
   const aiCaptionMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/ai\/captions\/(correct|translate)$/);
   if (req.method === 'POST' && aiCaptionMatch) {
     const projectPath = join(dataRoot, `${aiCaptionMatch[1]}.json`); const project = JSON.parse(await readFile(projectPath, 'utf8')); const payload = JSON.parse((await readBody(req, 2 * 1024 * 1024)).toString('utf8') || '{}');

@@ -284,7 +284,10 @@ async function handleApi(req, res, url) {
   const sttMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/stt$/);
   if (req.method === 'POST' && sttMatch) {
     const projectPath = join(dataRoot, `${sttMatch[1]}.json`); const project = JSON.parse(await readFile(projectPath, 'utf8'));
-    const source = project.source || project.previewPath; if (!source) throw new Error('자막을 생성할 영상이 없습니다.');
+    const selectedClip = project.clips?.find(clip => clip.id === project.selectedClipId);
+    const selectedClipSource = selectedClip?.previewUrl ? join(uploadRoot, basename(selectedClip.previewUrl)) : null;
+    const source = selectedClipSource || project.source || project.previewPath;
+    if (!source) throw new Error('자막을 생성할 영상이 없습니다.');
     const captionPath = join(uploadRoot, `${project.id}-stt.vtt`);
     const scriptPath = join(fileURLToPath(new URL('.', import.meta.url)), 'scripts', 'stt.py');
     const result = await execFile('python', [scriptPath, source, captionPath], { windowsHide: true, timeoutMs: 900000 });

@@ -1,5 +1,5 @@
 import { createServer } from 'node:http';
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, unlink } from 'node:fs/promises';
 import { basename, extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
@@ -149,6 +149,11 @@ async function handleApi(req, res, url) {
   if (req.method === 'POST' && url.pathname === '/api/assets') {
     const id = randomUUID(); const name = String(req.headers['x-file-name'] || 'asset.bin').replace(/[^a-zA-Z0-9._-]/g, '_'); const assetPath = join(uploadRoot, `${id}-${name}`); await writeFile(assetPath, await readBody(req)); const asset = { id, name, kind: String(req.headers['x-asset-kind'] || 'file'), path: assetPath, url: `/media/${basename(assetPath)}`, createdAt: new Date().toISOString() }; await writeFile(join(dataRoot, `asset-${id}.json`), JSON.stringify(asset, null, 2)); json(res, 201, asset); return true;
   }
+  const assetMatch = url.pathname.match(/^\/api\/assets\/([^/]+)$/);
+  if (req.method === 'DELETE' && assetMatch) {
+    const assetFile = join(dataRoot, `asset-${assetMatch[1]}.json`); let asset; try { asset = JSON.parse(await readFile(assetFile, 'utf8')); } catch { json(res, 404, { ok: false, error: '에셋을 찾을 수 없습니다.' }); return true; }
+    try { await unlink(asset.path); } catch {} await unlink(assetFile); json(res, 200, { ok: true, id: asset.id }); return true;
+  }
   if (req.method === 'GET' && url.pathname === '/api/assets') {
     const entries = await (await import('node:fs/promises')).readdir(dataRoot, { withFileTypes: true }); const assets = [];
     for (const entry of entries) if (entry.isFile() && entry.name.startsWith('asset-') && entry.name.endsWith('.json')) { try { assets.push(JSON.parse(await readFile(join(dataRoot, entry.name), 'utf8'))); } catch {} }
@@ -224,12 +229,13 @@ async function handleApi(req, res, url) {
   }
   if (req.method === 'POST' && exportMatch) {
     const projectPath = join(dataRoot, `${exportMatch[1]}.json`); const project = JSON.parse(await readFile(projectPath, 'utf8'));
+    project.exportStatus = 'rendering'; project.exportProgress = 5; project.exportError = null; await writeFile(projectPath, JSON.stringify(project, null, 2));
     let exportOptions = {}; try { const body = await readBody(req, 1024 * 1024); if (body.length) exportOptions = JSON.parse(body.toString('utf8')); } catch {}
     let source = project.previewPath || project.source; if (!source) throw new Error('내보낼 영상이 없습니다.');
     const segments = Array.isArray(project.edit?.segments) ? project.edit.segments.filter(item => Number(item.end) > Number(item.start)) : [];
     const hasSegmentSequence = segments.length > 1;
     if (hasSegmentSequence) source = await renderSegments(source, project.id, segments);
-    const output = join(uploadRoot, `${project.id}-export.mp4`);
+    const output = join(uploadRoot, `${project.id}-export.mp4`); project.exportProgress = 25; await writeFile(projectPath, JSON.stringify(project, null, 2));
     const start = hasSegmentSequence ? 0 : Math.max(0, Number(project.edit?.start ?? 0));
     const duration = hasSegmentSequence ? null : project.edit?.end ? Math.max(0.1, Number(project.edit.end) - start) : null;
     if (exportOptions.templateId) {
@@ -258,8 +264,8 @@ async function handleApi(req, res, url) {
     if (captionInputIndex !== null) args.push('-map', `${captionInputIndex}:0`, '-c:s', 'mov_text');
     args.push('-c:v', 'libx264', '-preset', 'veryfast', '-c:a', 'aac', '-movflags', '+faststart', output);
     project.edit = { ...(project.edit || {}), assetId: exportOptions.assetId || project.edit?.assetId || null };
-    await execFile('ffmpeg', args, { windowsHide: true });
-    project.exportPath = output; project.exportUrl = `/media/${basename(output)}`; project.exportStatus = 'completed';
+    try { await execFile('ffmpeg', args, { windowsHide: true }); } catch (error) { project.exportStatus = 'failed'; project.exportProgress = 0; project.exportError = error.message; await writeFile(projectPath, JSON.stringify(project, null, 2)); throw error; }
+    project.exportPath = output; project.exportUrl = `/media/${basename(output)}`; project.exportStatus = 'completed'; project.exportProgress = 100;
     await writeFile(projectPath, JSON.stringify(project, null, 2)); json(res, 200, { ok: true, downloadUrl: project.exportUrl }); return true;
   }
   const editMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/edit$/);

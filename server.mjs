@@ -189,7 +189,15 @@ async function handleApi(req, res, url) {
   const assetMatch = url.pathname.match(/^\/api\/assets\/([^/]+)$/);
   if (req.method === 'DELETE' && assetMatch) {
     const assetFile = join(dataRoot, `asset-${assetMatch[1]}.json`); let asset; try { asset = JSON.parse(await readFile(assetFile, 'utf8')); } catch { json(res, 404, { ok: false, error: '에셋을 찾을 수 없습니다.' }); return true; }
-    try { await unlink(asset.path); } catch {} await unlink(assetFile); json(res, 200, { ok: true, id: asset.id }); return true;
+    const entries = await (await import('node:fs/promises')).readdir(dataRoot, { withFileTypes: true }); let detachedTracks = 0;
+    for (const entry of entries) if (entry.isFile() && /^[0-9a-f-]{36}\.json$/i.test(entry.name)) {
+      const projectFile = join(dataRoot, entry.name); try { const project = JSON.parse(await readFile(projectFile, 'utf8')); const tracks = project.edit?.tracks || []; let changed = false;
+        for (const track of tracks) if (track.assetId === asset.id) { track.assetId = null; changed = true; detachedTracks += 1; }
+        if (project.edit?.assetId === asset.id) { project.edit.assetId = null; changed = true; }
+        if (changed) { project.updatedAt = new Date().toISOString(); await writeFile(projectFile, JSON.stringify(project, null, 2)); }
+      } catch {}
+    }
+    try { await unlink(asset.path); } catch {} await unlink(assetFile); json(res, 200, { ok: true, id: asset.id, detachedTracks }); return true;
   }
   if (req.method === 'GET' && url.pathname === '/api/assets') {
     const entries = await (await import('node:fs/promises')).readdir(dataRoot, { withFileTypes: true }); const assets = [];

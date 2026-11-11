@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node server.mjs",
     "test:acceptance": "node scripts/acceptance.mjs",
-    "test:export": "node scripts/export-check.mjs"
+    "test:export": "node scripts/export-check.mjs",
+    "test:e2e": "node scripts/e2e.mjs"
   }
 }

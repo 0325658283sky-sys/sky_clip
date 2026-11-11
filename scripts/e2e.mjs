@@ -1,0 +1,16 @@
+const base = process.argv[2] || process.env.SKYCLIP_URL || 'http://127.0.0.1:8787';
+const request = async (path, options) => { const response = await fetch(`${base}${path}`, options); const body = await response.json().catch(() => ({})); if (!response.ok) throw new Error(`${options?.method || 'GET'} ${path} failed: ${response.status} ${body.error || ''}`); return body; };
+const projects = await request('/api/projects');
+const project = (projects.projects || []).find(item => item.status === 'completed' && item.clips?.length);
+if (!project) throw new Error('완료된 프로젝트가 없습니다.');
+const clip = project.clips[0];
+await request(`/api/projects/${project.id}/select`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ clipId: clip.id }) });
+const feedback = await request(`/api/projects/${project.id}/clip-feedback`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ clipId: clip.id, type: 'favorite' }) });
+const captions = (clip.captions || []).slice(0, 2).map(item => ({ ...item, text: item.text }));
+await request(`/api/projects/${project.id}/captions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ captions }) });
+await request(`/api/projects/${project.id}/edit`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title: clip.title, segments: [{ start: 0, end: Math.min(3, clip.duration || 3) }], layers: [{ id: 'e2e-title', type: 'text', role: 'title', text: clip.title, position: 'top', fontSize: 42, color: '#ffffff', shadow: true }], captionStyle: { position: 'bottom', fontSize: 28, color: '#ffffff' }, tool: 'e2e' }) });
+const exported = await request(`/api/projects/${project.id}/export`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ burnCaptions: true }) });
+const download = await fetch(new URL(exported.downloadUrl, base));
+const result = { projectId: project.id, selectedClipId: clip.id, feedback: feedback.feedback, exportUrl: exported.downloadUrl, downloadStatus: download.status, downloadBytes: Number(download.headers.get('content-length') || 0) };
+console.log(JSON.stringify(result, null, 2));
+if (!download.ok || result.downloadBytes <= 0) process.exitCode = 1;

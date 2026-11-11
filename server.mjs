@@ -94,6 +94,19 @@ function buildClipTitle(captions, index) {
   return `${candidate.slice(0, 32)}${candidate.length > 32 ? '…' : ''}`;
 }
 
+function correctCaptionSet(captions) {
+  const corrected = []; let previous = '';
+  for (const item of Array.isArray(captions) ? captions : []) {
+    const words = Array.isArray(item.words) ? item.words.map(word => ({ ...word, text: String(word.text || '').replace(/\s+/g, ' ').trim() })).filter(word => word.text) : [];
+    const text = String(words.length ? words.map(word => word.text).join(' ') : item.text || '').replace(/([,.!?！？])\1+/g, '$1').replace(/\s+/g, ' ').trim();
+    if (!text || text === previous) continue;
+    const start = Math.max(0, Number(item.start) || 0); const end = Math.max(start + 0.05, Number(item.end) || start + 0.2);
+    corrected.push({ ...item, start: Number(start.toFixed(3)), end: Number(end.toFixed(3)), text, words }); previous = text;
+  }
+  for (let index = 1; index < corrected.length; index += 1) if (corrected[index].start < corrected[index - 1].end) corrected[index - 1].end = corrected[index].start;
+  return corrected.filter(item => item.end > item.start);
+}
+
 async function extractClip(sourcePath, projectId, index, start, end, selectionMeta = {}) {
   const clipPath = join(uploadRoot, `${projectId}-clip-${index}.mp4`); const thumbPath = join(uploadRoot, `${projectId}-clip-${index}.jpg`);
   const duration = Math.max(0.5, end - start);
@@ -308,6 +321,16 @@ async function handleApi(req, res, url) {
     if (typeof payload.title === 'string' && payload.title.trim()) project.title = payload.title.trim();
     await writeFile(projectPath, JSON.stringify(project, null, 2)); json(res, 200, { ok: true, edit: project.edit }); return true;
   }
+  const aiCaptionMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/ai\/captions\/(correct|translate)$/);
+  if (req.method === 'POST' && aiCaptionMatch) {
+    const projectPath = join(dataRoot, `${aiCaptionMatch[1]}.json`); const project = JSON.parse(await readFile(projectPath, 'utf8')); const payload = JSON.parse((await readBody(req, 2 * 1024 * 1024)).toString('utf8') || '{}');
+    if (aiCaptionMatch[2] === 'correct') { const sourceCaptions = Array.isArray(payload.captions) ? payload.captions : project.captions || []; const captions = correctCaptionSet(sourceCaptions); project.captions = captions; if (project.selectedClipId) { const clip = project.clips?.find(item => item.id === project.selectedClipId); if (clip) clip.captions = captions; } const vtt = ['WEBVTT', '', ...captions.flatMap((item, index) => [`${index + 1}`, `${toVttTime(item.start)} --> ${toVttTime(item.end)}`, item.text, ''])].join('\n'); const captionPath = join(uploadRoot, `${project.id}.vtt`); await writeFile(captionPath, vtt, 'utf8'); project.captionPath = captionPath; project.captionUrl = `/media/${basename(captionPath)}`; project.edit = { ...(project.edit || {}), tool: 'AI 자막 교정(로컬)' }; await writeFile(projectPath, JSON.stringify(project, null, 2)); json(res, 200, { ok: true, provider: 'local-normalizer', captions, captionUrl: project.captionUrl }); return true; }
+    const translationUrl = process.env.SKYCLIP_TRANSLATION_URL;
+    if (!translationUrl) { json(res, 503, { ok: false, provider: null, error: '번역 API가 연결되지 않았습니다. SKYCLIP_TRANSLATION_URL을 설정하면 실제 번역 API를 호출합니다.' }); return true; }
+    const remote = await fetch(translationUrl, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ targetLanguage: payload.targetLanguage || 'en', captions: project.captions || [] }) }); const result = await remote.json().catch(() => ({})); if (!remote.ok) { json(res, 502, { ok: false, provider: translationUrl, error: result.error || '번역 API 호출에 실패했습니다.' }); return true; } const captions = correctCaptionSet(result.captions || result.translations || []); project.captions = captions; project.edit = { ...(project.edit || {}), tool: `AI 번역:${payload.targetLanguage || 'en'}` }; await writeFile(projectPath, JSON.stringify(project, null, 2)); json(res, 200, { ok: true, provider: translationUrl, captions }); return true;
+  }
+  const aiMediaMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/ai\/media$/);
+  if (req.method === 'POST' && aiMediaMatch) { const mediaUrl = process.env.SKYCLIP_MEDIA_API_URL; if (!mediaUrl) { json(res, 503, { ok: false, provider: null, error: '생성형 미디어 API가 연결되지 않았습니다. SKYCLIP_MEDIA_API_URL을 설정하거나 로컬 에셋을 업로드하세요.' }); return true; } const payload = JSON.parse((await readBody(req, 2 * 1024 * 1024)).toString('utf8') || '{}'); const remote = await fetch(mediaUrl, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) }); const result = await remote.json().catch(() => ({})); json(res, remote.ok ? 200 : 502, { ok: remote.ok, provider: mediaUrl, ...result }); return true; }
   const captionMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/captions$/);
   if (req.method === 'POST' && captionMatch) {
     const projectPath = join(dataRoot, `${captionMatch[1]}.json`); const project = JSON.parse(await readFile(projectPath, 'utf8'));

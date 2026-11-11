@@ -61,6 +61,7 @@ button { cursor: pointer; }
 .canvas-title-layer { pointer-events:auto; cursor:grab; user-select:none; }.canvas-title-layer:active { cursor:grabbing; }
 .canvas-text-layer { position:absolute; left:8%; right:8%; z-index:2; text-align:center; pointer-events:auto; cursor:grab; user-select:none; }.selected-layer { outline:2px solid #8b68ef; outline-offset:3px; }
 .editor-canvas[data-aspect-ratio="4:3"] { width:min(520px,70%); height:min(54vh,390px); }
+.result-evaluation-tabs { display:flex; flex-wrap:wrap; gap:12px; padding:10px 0; border-top:1px solid #ededf1; border-bottom:1px solid #ededf1; }.result-evaluation-tab { border:0; background:transparent; padding:2px 0; color:#8b8f9b; font-size:11px; cursor:pointer; }.result-evaluation-tab b { color:inherit; }.result-evaluation-tab.active { color:#5c3bd2; font-weight:800; border-bottom:2px solid #6843dd; }.result-insight h3 span { color:#6843dd; margin-left:4px; }
 
 /* Dashboard: single working surface, not a card mosaic. */
 .dashboard-page { max-width:1240px; padding-top:42px; }

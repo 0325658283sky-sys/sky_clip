@@ -82,7 +82,7 @@ async function extractClip(sourcePath, projectId, index, start, end) {
   await execFile('ffmpeg', ['-y', '-i', ready.path, '-frames:v', '1', '-q:v', '3', thumbPath], { windowsHide: true, timeoutMs: 60000 });
   const audio = await measureAudio(clipPath, duration);
   const durationFit = Math.max(0, Math.min(1, 1 - Math.abs(duration - 22) / 22));
-  const scoreBreakdown = { speechCoverage: audio.speechCoverage, silenceEvents: audio.silenceEvents, durationFit: Number(durationFit.toFixed(3)), evidence: ['실제 오디오 무음 구간', '클립 길이'] };
+  const scoreBreakdown = { speechCoverage: audio.speechCoverage, silenceEvents: audio.silenceEvents, durationFit: Number(durationFit.toFixed(3)), hook: Math.round((audio.speechCoverage * 0.65 + durationFit * 0.35) * 100), topic: Math.round(durationFit * 100), flow: Math.round((1 - Math.min(1, audio.silenceEvents / 8)) * 100), immersion: Math.round(audio.score == null ? 0 : audio.score * 100), ending: Math.round((audio.speechCoverage * 0.5 + durationFit * 0.5) * 100), evidence: ['실제 오디오 무음 구간', '클립 길이', '음성 커버리지'] };
   const score = audio.score == null ? null : Math.round(audio.score * 0.7 + durationFit * 30);
   const captionTitle = ready.captions?.[0]?.text?.replace(/\s+/g, ' ').trim().slice(0, 28);
   const title = captionTitle || `핵심 장면 ${index}`;
@@ -208,6 +208,14 @@ async function handleApi(req, res, url) {
     if (!clip) { json(res, 404, { ok: false, error: '선택한 클립을 찾을 수 없습니다.' }); return true; }
     project.previewUrl = clip.previewUrl; project.previewPath = join(uploadRoot, basename(clip.previewUrl)); project.captions = clip.captions || project.captions || []; project.title = clip.title || project.title; project.selectedClipId = clip.id; await writeFile(projectPath, JSON.stringify(project, null, 2)); json(res, 200, { ok: true, selectedClipId: clip.id, previewUrl: project.previewUrl, captions: project.captions }); return true;
   }
+  const feedbackMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/clip-feedback$/);
+  if (req.method === 'POST' && feedbackMatch) {
+    const projectPath = join(dataRoot, `${feedbackMatch[1]}.json`); const project = JSON.parse(await readFile(projectPath, 'utf8'));
+    const payload = JSON.parse((await readBody(req, 256 * 1024)).toString('utf8')); const clip = (project.clips || []).find(item => item.id === payload.clipId);
+    if (!clip) { json(res, 404, { ok: false, error: '선택한 클립을 찾을 수 없습니다.' }); return true; }
+    const feedback = ['favorite', 'like', 'dislike'].includes(payload.type) ? payload.type : null;
+    clip.feedback = feedback; project.selectedClipId = clip.id; await writeFile(projectPath, JSON.stringify(project, null, 2)); json(res, 200, { ok: true, clipId: clip.id, feedback }); return true;
+  }
   const toolMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/tools\/([^/]+)$/);
   if (req.method === 'POST' && toolMatch && toolMatch[2] === 'silence') {
     const projectPath = join(dataRoot, `${toolMatch[1]}.json`); const project = JSON.parse(await readFile(projectPath, 'utf8')); const source = project.previewPath || project.source; const output = join(uploadRoot, `${project.id}-silence.mp4`);
@@ -242,7 +250,7 @@ async function handleApi(req, res, url) {
     if (project.captionPath) { captionInputIndex = nextInput++; args.push('-f', 'webvtt', '-i', project.captionPath); }
     if (hasAudioAsset) { args.push('-stream_loop', '-1', '-i', overlayAsset.path); audioInputIndex = nextInput++; }
     if (exportOptions.burnCaptions && project.captionPath) { const captionFile = project.captionPath.replaceAll('\\', '/').replaceAll(':', '\\:'); const style = project.edit?.captionStyle || {}; const fontSize = Math.max(12, Math.min(72, Number(style.fontSize) || 28)); const alignment = style.position === 'top' ? 8 : style.position === 'middle' ? 5 : 2; const rawColor = String(style.color || '#ffffff').replace('#', '').padEnd(6, 'f').slice(0, 6); const assColor = `&H00${rawColor.slice(4, 6)}${rawColor.slice(2, 4)}${rawColor.slice(0, 2)}`; filter = `subtitles=filename='${captionFile}':force_style='FontSize=${fontSize},PrimaryColour=${assColor},Alignment=${alignment},Outline=2,MarginV=36',${filter}`; }
-    for (const layer of (project.edit?.layers || [])) if (layer.type === 'text' && layer.text) { const text = escapeDrawtext(layer.text); const size = Math.max(12, Math.min(96, Number(layer.fontSize) || 32)); const y = layer.position === 'bottom' ? 'h-text_h-80' : layer.position === 'middle' ? '(h-text_h)/2' : '80'; const shadow = layer.shadow ? ':shadowcolor=black@0.65:shadowx=2:shadowy=2' : ''; filter = `${filter},drawtext=fontfile='C\\:/Windows/Fonts/arial.ttf':text='${text}':fontcolor=${layer.color || 'white'}:fontsize=${size}:borderw=2:bordercolor=black@0.7${shadow}:x=(w-text_w)/2:y=${y}`; }
+    for (const layer of (project.edit?.layers || [])) if (layer.type === 'text' && layer.text) { const text = escapeDrawtext(layer.text); const size = Math.max(12, Math.min(120, Number(layer.fontSize) || 32)); const y = layer.position === 'bottom' ? 'h-text_h-80' : layer.position === 'middle' ? '(h-text_h)/2' : '80'; const shadow = layer.shadow ? ':shadowcolor=black@0.65:shadowx=2:shadowy=2' : ''; const border = layer.outline || 'black@0.7'; const box = layer.background && layer.background !== 'transparent' ? `:box=1:boxcolor=${layer.background}@0.72:boxborderw=12` : ''; filter = `${filter},drawtext=fontfile='C\\:/Windows/Fonts/arial.ttf':text='${text}':fontcolor=${layer.color || 'white'}:fontsize=${size}:borderw=2:bordercolor=${border}${shadow}${box}:x=(w-text_w)/2:y=${y}`; }
     for (const effect of (project.edit?.effects || [])) { if (effect === 'grayscale') filter += ',hue=s=0'; if (effect === 'warm') filter += ',colorbalance=rs=.08:gs=.03:bs=-.04'; if (effect === 'contrast') filter += ',eq=contrast=1.18:brightness=0.02'; if (effect === 'fade-in') filter += ',fade=t=in:st=0:d=0.5'; if (effect === 'fade-out' && duration) filter += `,fade=t=out:st=${Math.max(0.1, duration - 0.5)}:d=0.5`; }
     if (hasVisualOverlay) { args.push('-filter_complex', `[0:v]${filter}[base];[${visualInputIndex}:v]format=rgba,colorchannelmixer=aa=0.65[asset];[base][asset]overlay=W-w-24:H-h-24[vout]`, '-map', '[vout]'); } else { args.push('-vf', filter, '-map', '0:v:0'); }
     if (hasAudioAsset) args.push('-map', `${audioInputIndex}:a:0`); else args.push('-map', '0:a?');

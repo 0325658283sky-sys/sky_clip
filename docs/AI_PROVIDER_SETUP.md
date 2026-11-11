@@ -4,7 +4,7 @@ SkyClip은 API 키나 공급자 URL이 없는 경우 번역·생성형 미디어
 
 ## 번역
 
-`SKYCLIP_TRANSLATION_URL`에 JSON HTTP endpoint를 설정한다.
+`SKYCLIP_TRANSLATION_URL`에 JSON HTTP endpoint를 설정한다. Bearer 인증이 필요하면 `SKYCLIP_TRANSLATION_TOKEN`을 함께 설정한다.
 
 요청 본문은 다음 형식이다.
 
@@ -19,6 +19,8 @@ SkyClip은 API 키나 공급자 URL이 없는 경우 번역·생성형 미디어
 
 ## 생성형 미디어
 
-`SKYCLIP_MEDIA_API_URL`에 이미지·음성·음악·효과음 요청을 받을 endpoint를 설정한다. SkyClip은 `kind`, `prompt`, `clipId`를 JSON으로 전송한다.
+`SKYCLIP_MEDIA_API_URL`에 이미지·음성·음악·효과음 요청을 받을 endpoint를 설정한다. Bearer 인증이 필요하면 `SKYCLIP_MEDIA_API_TOKEN`을 함께 설정한다. SkyClip은 `kind`, `prompt`, `clipId`, 선택적 `trackId`를 JSON으로 전송한다.
 
-공급자의 실제 에셋 저장 형식과 인증 방식은 아직 프로젝트에 설정되지 않았다. URL 또는 키를 제공받으면 결과 에셋을 로컬 보관함과 트랙에 저장하는 연결 작업을 진행한다.
+성공 응답은 `assetUrl`, `url`, 또는 `asset.url` 중 하나에 HTTP(S) 다운로드 URL을 포함해야 한다. 선택적으로 `kind`에 `image`, `video`, `audio`를 반환할 수 있다.
+
+SkyClip은 공급자 요청을 최초 실패 시 한 번 재시도한다. 성공한 원격 파일은 로컬 에셋 보관함에 저장되고 선택 트랙(없으면 호환되는 새 트랙)에 연결된다. 공급자 미설정은 `503`과 `retryable: false`, 일시적 공급자/다운로드 실패는 `502`와 `retryable: true`로 응답한다. URL·토큰은 API 응답이나 프로젝트 파일에 저장하지 않는다.

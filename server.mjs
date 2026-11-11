@@ -63,6 +63,19 @@ async function detectSceneStarts(sourcePath, total, window) {
   } catch { return []; }
 }
 
+function selectHighlightStarts(sceneStarts, total, window, limit = 5) {
+  const maxStart = Math.max(0, total - window); const anchors = Array.from({ length: limit }, (_, index) => limit === 1 ? 0 : maxStart * index / (limit - 1));
+  const scenes = [...new Set((sceneStarts || []).map(value => Number(value)).filter(value => Number.isFinite(value) && value >= 0 && value <= maxStart).map(value => Number(value.toFixed(2))))].sort((a, b) => a - b);
+  const minimumGap = Math.max(3, Math.min(window * 0.45, maxStart / Math.max(1, limit - 1) * 0.55)); const picks = [];
+  for (const anchor of anchors) {
+    const nearby = scenes.filter(value => !picks.some(pick => Math.abs(pick.start - value) < minimumGap)).sort((left, right) => Math.abs(left - anchor) - Math.abs(right - anchor))[0];
+    const fallback = Number(Math.max(0, Math.min(maxStart, anchor)).toFixed(2)); const start = nearby == null ? fallback : nearby;
+    if (!picks.some(pick => Math.abs(pick.start - start) < minimumGap)) picks.push({ start, sceneAligned: nearby != null, anchor: Number(anchor.toFixed(2)) });
+  }
+  for (const scene of scenes) { if (picks.length >= limit) break; if (!picks.some(pick => Math.abs(pick.start - scene) < minimumGap)) picks.push({ start: scene, sceneAligned: true, anchor: null }); }
+  return picks.sort((left, right) => left.start - right.start).slice(0, limit);
+}
+
 async function makeReadyClip(clipPath, projectId, index, duration) {
   const vttPath = join(uploadRoot, `${projectId}-clip-${index}.vtt`); const readyPath = join(uploadRoot, `${projectId}-ready-${index}.mp4`); let captions = [];
   try { const result = await execFile('python', [join(fileURLToPath(new URL('.', import.meta.url)), 'scripts', 'stt.py'), clipPath, vttPath], { windowsHide: true, timeoutMs: 300000 }); const output = JSON.parse(result.stdout.trim()); captions = output.captions || []; } catch {}
@@ -238,14 +251,13 @@ async function handleApi(req, res, url) {
     const total = Number(project.metadata?.duration || 15);
     const window = Math.min(22, total);
     const sceneStarts = await detectSceneStarts(project.source, total, window);
-    const fallbackStarts = [0, total * 0.2, total * 0.4, total * 0.6, total * 0.8].map(value => Math.max(0, Math.min(Math.max(0, total - window), value)));
-    const starts = [...new Set([...sceneStarts.slice(0, 5), ...fallbackStarts].map(value => Number(value.toFixed(2))))].sort((a, b) => a - b).slice(0, 5);
-    project.analysisEvidence = { selector: sceneStarts.length ? 'ffmpeg-scene-change-plus-uniform-fallback' : 'uniform-fallback', sceneCandidates: sceneStarts.length, windowSeconds: window };
+    const candidates = selectHighlightStarts(sceneStarts, total, window);
+    project.analysisEvidence = { selector: sceneStarts.length ? 'scene-aligned-diverse-window-selection' : 'diverse-uniform-window-selection', sceneCandidates: sceneStarts.length, windowSeconds: window, candidateStarts: candidates };
     project.clips = [];
-    for (let index = 0; index < starts.length; index += 1) {
-      const start = starts[index];
-      if (window > 0.5) project.clips.push(await extractClip(project.source, project.id, index + 1, start, Math.min(total, start + window), { sceneAligned: sceneStarts.some(candidate => Math.abs(candidate - start) < 0.05) }));
-      project.progress = Math.min(92, 25 + Math.round(((index + 1) / starts.length) * 67)); project.updatedAt = new Date().toISOString(); await writeFile(projectPath, JSON.stringify(project, null, 2));
+    for (let index = 0; index < candidates.length; index += 1) {
+      const candidate = candidates[index];
+      if (window > 0.5) project.clips.push(await extractClip(project.source, project.id, index + 1, candidate.start, Math.min(total, candidate.start + window), { sceneAligned: candidate.sceneAligned, anchor: candidate.anchor }));
+      project.progress = Math.min(92, 25 + Math.round(((index + 1) / candidates.length) * 67)); project.updatedAt = new Date().toISOString(); await writeFile(projectPath, JSON.stringify(project, null, 2));
     }
     if (project.clips[0]) { project.previewUrl = project.clips[0].previewUrl; project.previewPath = join(uploadRoot, basename(project.clips[0].previewUrl)); project.captions = project.clips[0].captions || []; }
     project.status = 'completed'; project.progress = 100;

@@ -2,3 +2,4 @@
 node_modules/
 test-e2e.mp4
 .rea-chrome-profile/
+docs/rea-evidence-*.json

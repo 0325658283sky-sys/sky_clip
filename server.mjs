@@ -305,6 +305,8 @@ async function handleApi(req, res, url) {
     await writeFile(projectPath, JSON.stringify(project, null, 2)); json(res, 200, { ok: true, downloadUrl: project.exportUrl }); return true;
   }
   const editMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/edit$/);
+  const tracksMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/tracks$/);
+  if (req.method === 'POST' && tracksMatch) { const projectPath = join(dataRoot, `${tracksMatch[1]}.json`); const project = JSON.parse(await readFile(projectPath, 'utf8')); const payload = JSON.parse((await readBody(req, 2 * 1024 * 1024)).toString('utf8') || '{}'); const tracks = Array.isArray(payload.tracks) ? payload.tracks.map((track, index) => ({ id: String(track.id || `track-${index + 1}`), name: String(track.name || `트랙 ${index + 1}`), kind: ['video', 'audio', 'text', 'caption'].includes(track.kind) ? track.kind : 'video', muted: Boolean(track.muted) })) : []; const transitions = Array.isArray(payload.transitions) ? payload.transitions.map(item => ({ from: String(item.from || ''), to: String(item.to || ''), type: ['none', 'fade', 'cut'].includes(item.type) ? item.type : 'none', duration: Math.max(0, Math.min(2, Number(item.duration) || 0.25)) })) : []; project.edit = { ...(project.edit || {}), tracks, transitions, tool: '다중 트랙·전환 상태' }; await writeFile(projectPath, JSON.stringify(project, null, 2)); json(res, 200, { ok: true, tracks, transitions }); return true; }
   const editHistoryMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/edit\/(undo|redo)$/);
   if (req.method === 'POST' && editHistoryMatch) {
     const projectPath = join(dataRoot, `${editHistoryMatch[1]}.json`); const project = JSON.parse(await readFile(projectPath, 'utf8')); const direction = editHistoryMatch[2];

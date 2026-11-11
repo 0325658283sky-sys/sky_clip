@@ -286,7 +286,7 @@ async function handleApi(req, res, url) {
     const hasAudioAsset = Boolean(overlayAsset?.path && overlayAsset.kind === 'audio');
     let nextInput = 1; let visualInputIndex = null; let audioInputIndex = null; let captionInputIndex = null;
     if (hasVisualOverlay) { if (overlayAsset.kind === 'video') args.push('-stream_loop', '-1'); args.push('-i', overlayAsset.path); visualInputIndex = nextInput++; }
-    let filter = 'scale=720:-2';
+    let filter = project.edit?.aspectRatio === '1:1' ? 'scale=720:720:force_original_aspect_ratio=decrease,pad=720:720:(ow-iw)/2:(oh-ih)/2' : 'scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2';
     if (duration) args.push('-t', String(duration));
     if (project.captionPath) { captionInputIndex = nextInput++; args.push('-f', 'webvtt', '-i', project.captionPath); }
     if (hasAudioAsset) { args.push('-stream_loop', '-1', '-i', overlayAsset.path); audioInputIndex = nextInput++; }
@@ -301,7 +301,8 @@ async function handleApi(req, res, url) {
     args.push('-c:v', 'libx264', '-preset', 'veryfast', '-c:a', 'aac', '-movflags', '+faststart', output);
     project.edit = { ...(project.edit || {}), assetId: exportOptions.assetId || project.edit?.assetId || null };
     try { await execFile('ffmpeg', args, { windowsHide: true }); } catch (error) { project.exportStatus = 'failed'; project.exportProgress = 0; project.exportError = error.message; await writeFile(projectPath, JSON.stringify(project, null, 2)); throw error; }
-    project.exportPath = output; project.exportUrl = `/media/${basename(output)}`; project.exportStatus = 'completed'; project.exportProgress = 100;
+    const exportMetadata = await probe(output); const expectedSize = project.edit?.aspectRatio === '1:1' ? [720, 720] : [720, 1280]; if (!exportMetadata.duration || exportMetadata.width !== expectedSize[0] || exportMetadata.height !== expectedSize[1]) { project.exportStatus = 'failed'; project.exportProgress = 0; project.exportError = `내보내기 검증 실패: ${exportMetadata.width || 0}x${exportMetadata.height || 0}, ${exportMetadata.duration || 0}초`; await writeFile(projectPath, JSON.stringify(project, null, 2)); json(res, 422, { ok: false, error: project.exportError, metadata: exportMetadata }); return true; }
+    project.exportPath = output; project.exportUrl = `/media/${basename(output)}`; project.exportMetadata = exportMetadata; project.exportStatus = 'completed'; project.exportProgress = 100;
     await writeFile(projectPath, JSON.stringify(project, null, 2)); json(res, 200, { ok: true, downloadUrl: project.exportUrl }); return true;
   }
   const editMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/edit$/);

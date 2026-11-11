@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "start": "node server.mjs",
+    "test:quality": "node scripts/highlight-quality.mjs",
     "test:acceptance": "node scripts/acceptance.mjs",
     "test:export": "node scripts/export-check.mjs",
     "test:e2e": "node scripts/e2e.mjs"

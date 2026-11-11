@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { promisify } from 'node:util';
+import { buildClipTitle as generateClipTitle, selectHighlightStarts as chooseHighlightStarts } from './lib/highlight-quality.mjs';
 
 const root = join(fileURLToPath(new URL('.', import.meta.url)), 'public');
 const dataRoot = join(fileURLToPath(new URL('.', import.meta.url)), '.skyclip-data');
@@ -63,19 +64,6 @@ async function detectSceneStarts(sourcePath, total, window) {
   } catch { return []; }
 }
 
-function selectHighlightStarts(sceneStarts, total, window, limit = 5) {
-  const maxStart = Math.max(0, total - window); const anchors = Array.from({ length: limit }, (_, index) => limit === 1 ? 0 : maxStart * index / (limit - 1));
-  const scenes = [...new Set((sceneStarts || []).map(value => Number(value)).filter(value => Number.isFinite(value) && value >= 0 && value <= maxStart).map(value => Number(value.toFixed(2))))].sort((a, b) => a - b);
-  const minimumGap = Math.max(3, Math.min(window * 0.45, maxStart / Math.max(1, limit - 1) * 0.55)); const picks = [];
-  for (const anchor of anchors) {
-    const nearby = scenes.filter(value => !picks.some(pick => Math.abs(pick.start - value) < minimumGap)).sort((left, right) => Math.abs(left - anchor) - Math.abs(right - anchor))[0];
-    const fallback = Number(Math.max(0, Math.min(maxStart, anchor)).toFixed(2)); const start = nearby == null ? fallback : nearby;
-    if (!picks.some(pick => Math.abs(pick.start - start) < minimumGap)) picks.push({ start, sceneAligned: nearby != null, anchor: Number(anchor.toFixed(2)) });
-  }
-  for (const scene of scenes) { if (picks.length >= limit) break; if (!picks.some(pick => Math.abs(pick.start - scene) < minimumGap)) picks.push({ start: scene, sceneAligned: true, anchor: null }); }
-  return picks.sort((left, right) => left.start - right.start).slice(0, limit);
-}
-
 async function makeReadyClip(clipPath, projectId, index, duration) {
   const vttPath = join(uploadRoot, `${projectId}-clip-${index}.vtt`); const readyPath = join(uploadRoot, `${projectId}-ready-${index}.mp4`); let captions = [];
   try { const result = await execFile('python', [join(fileURLToPath(new URL('.', import.meta.url)), 'scripts', 'stt.py'), clipPath, vttPath], { windowsHide: true, timeoutMs: 300000 }); const output = JSON.parse(result.stdout.trim()); captions = output.captions || []; } catch {}
@@ -97,15 +85,6 @@ function buildHighlightSignals(captions, duration, selectionMeta = {}) {
   const semanticSignal = Math.min(1, meaningCueCount / 3 * 0.55 + completedSentence * 0.25 + lexicalDiversity * 0.2);
   const noisePenalty = normalizedWords.length >= 4 ? Math.min(1, (text.match(/(.)\1{2,}|[,]{3,}|[0-9]{3,}/g) || []).length / 2) : 0;
   return { lexicalDiversity: Number(lexicalDiversity.toFixed(3)), captionCoverage: Number(captionCoverage.toFixed(3)), sceneScore, reactionScore, semanticSignal: Number(semanticSignal.toFixed(3)), noisePenalty: Number(noisePenalty.toFixed(3)), selectionReason: selectionMeta.sceneAligned ? '장면 변화·음성 반응·의미 단서가 함께 감지된 구간' : '음성·자막·의미 단서·길이 지표가 안정적인 구간' };
-}
-
-function buildClipTitle(captions, index) {
-  const rows = captions.map(item => String(item.text || '').replace(/\s+/g, ' ').trim()).filter(Boolean);
-  if (!rows.length) return `핵심 장면 ${index}`;
-  const ranked = rows.map((row, rowIndex) => { const words = row.split(/\s+/).filter(Boolean); const hook = (row.match(/(왜|어떻게|진짜|대박|미쳤|결국|핵심|방법|이유|처음|마지막|주의|성공|실패|추천|놀랍|충격|반전|비밀)/g) || []).length; const completion = /[.!?。！？]|(다|요|죠|니다|세요)$/.test(row) ? 1 : 0; const lengthFit = 1 - Math.min(1, Math.abs(words.length - 7) / 12); return { row, score: hook * 2.4 + completion + lengthFit + (rowIndex === 0 ? 0.35 : 0) }; }).sort((left, right) => right.score - left.score);
-  const cleaned = ranked[0].row.replace(/^(그래서|근데|그리고|어|음|저|이제)\s+/u, '').replace(/[.!?。！？]+/g, ' ').replace(/\s+/g, ' ').trim();
-  const words = cleaned.split(' ').filter(Boolean).filter(word => /[\p{L}\p{N}]/u.test(word) && word.replace(/[^\p{L}\p{N}]/gu, '').length >= 2).filter((word, wordIndex, all) => { if (wordIndex === 0) return true; const normalize = value => value.replace(/[.,!?。！？,，]+$/g, ''); return normalize(word) !== normalize(all[wordIndex - 1]); }); const candidate = words.slice(0, 8).join(' ');
-  return `${candidate.slice(0, 32)}${candidate.length > 32 ? '…' : ''}`;
 }
 
 function correctCaptionSet(captions) {
@@ -134,7 +113,7 @@ async function extractClip(sourcePath, projectId, index, start, end, selectionMe
   const scoreValue = speech * 0.25 + durationFit * 0.14 + signals.sceneScore * 0.18 + signals.captionCoverage * 0.14 + signals.lexicalDiversity * 0.08 + signals.reactionScore * 0.09 + signals.semanticSignal * 0.12 - signals.noisePenalty * 0.06;
   const scoreBreakdown = { speechCoverage: audio.speechCoverage, silenceEvents: audio.silenceEvents, durationFit: Number(durationFit.toFixed(3)), hook: Math.round((speech * 0.4 + signals.reactionScore * 0.22 + signals.sceneScore * 0.2 + signals.semanticSignal * 0.18) * 100), topic: Math.round((signals.captionCoverage * 0.42 + signals.lexicalDiversity * 0.28 + signals.semanticSignal * 0.3) * 100), flow: Math.round((1 - Math.min(1, (audio.silenceEvents || 0) / 8)) * 100), immersion: Math.round((speech * 0.42 + signals.sceneScore * 0.22 + signals.reactionScore * 0.18 + signals.semanticSignal * 0.18) * 100), ending: Math.round((durationFit * 0.45 + signals.captionCoverage * 0.3 + signals.semanticSignal * 0.25) * 100), evidence: ['실제 오디오 무음 구간', 'FFmpeg 장면 변화 후보', '자막 커버리지·어휘 다양성', '문장 완결·핵심 단서·어휘 다양성', signals.reactionScore > 0 ? '음성 반응 표현' : '음성 반응 표현 미검출'], signals };
   const score = audio.score == null ? null : Math.round(scoreValue * 100);
-  const title = buildClipTitle(ready.captions || [], index);
+  const title = generateClipTitle(ready.captions || [], index);
   return { id: `${projectId}-${index}`, start, end, duration, title, titleSource: 'generated', score, scoreType: '음성·장면·의미·자막 결합 휴리스틱', metrics: { ...audio, ...signals }, scoreBreakdown, captions: ready.captions, ready: !ready.fallback, aspectRatio: ready.fallback ? 'source' : '9:16', previewUrl: `/media/${basename(ready.path)}`, sourcePreviewUrl: `/media/${basename(clipPath)}`, thumbnailUrl: `/media/${basename(thumbPath)}` };
 }
 
@@ -195,7 +174,7 @@ async function handleApi(req, res, url) {
     projects.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))); json(res, 200, { projects }); return true;
   }
   const projectGet = url.pathname.match(/^\/api\/projects\/([^/]+)$/);
-  if (req.method === 'GET' && projectGet) { const projectPath = join(dataRoot, `${projectGet[1]}.json`); const project = JSON.parse(await readFile(projectPath, 'utf8')); const started = Date.parse(project.downloadStartedAt || ''); const updated = Date.parse(project.updatedAt || project.createdAt || ''); let changed = false; for (const [index, clip] of (project.clips || []).entries()) if (clip.titleSource !== 'manual' && (clip.scoreType === '음성·장면·자막 결합 휴리스틱' || clip.scoreType === '음성·장면·의미·자막 결합 휴리스틱') && clip.captions?.length) { const title = buildClipTitle(clip.captions, index + 1); if (title !== clip.title) { clip.title = title; changed = true; } } if (project.status === 'downloading' && Number.isFinite(started) && Date.now() - started > 60000) { project.status = 'failed'; project.progress = 0; project.error = '링크 영상 다운로드가 60초 이상 진행되지 않아 중단되었습니다. 다시 시도해 주세요.'; project.updatedAt = new Date().toISOString(); changed = true; } else if (project.status === 'analyzing' && project.clips?.length && Number.isFinite(updated) && Date.now() - updated > 120000) { project.status = 'completed'; project.progress = 100; project.analysisRecovery = 'stale-analysis-recovered'; project.updatedAt = new Date().toISOString(); changed = true; } if (changed) await writeFile(projectPath, JSON.stringify(project, null, 2)); json(res, 200, project); return true; }
+  if (req.method === 'GET' && projectGet) { const projectPath = join(dataRoot, `${projectGet[1]}.json`); const project = JSON.parse(await readFile(projectPath, 'utf8')); const started = Date.parse(project.downloadStartedAt || ''); const updated = Date.parse(project.updatedAt || project.createdAt || ''); let changed = false; for (const [index, clip] of (project.clips || []).entries()) if (clip.titleSource !== 'manual' && (clip.scoreType === '음성·장면·자막 결합 휴리스틱' || clip.scoreType === '음성·장면·의미·자막 결합 휴리스틱') && clip.captions?.length) { const title = generateClipTitle(clip.captions, index + 1); if (title !== clip.title) { clip.title = title; changed = true; } } if (project.status === 'downloading' && Number.isFinite(started) && Date.now() - started > 60000) { project.status = 'failed'; project.progress = 0; project.error = '링크 영상 다운로드가 60초 이상 진행되지 않아 중단되었습니다. 다시 시도해 주세요.'; project.updatedAt = new Date().toISOString(); changed = true; } else if (project.status === 'analyzing' && project.clips?.length && Number.isFinite(updated) && Date.now() - updated > 120000) { project.status = 'completed'; project.progress = 100; project.analysisRecovery = 'stale-analysis-recovered'; project.updatedAt = new Date().toISOString(); changed = true; } if (changed) await writeFile(projectPath, JSON.stringify(project, null, 2)); json(res, 200, project); return true; }
   if (req.method === 'GET' && url.pathname === '/api/templates') {
     const file = join(dataRoot, 'templates.json'); try { json(res, 200, { templates: JSON.parse(await readFile(file, 'utf8')) }); } catch { json(res, 200, { templates: [] }); } return true;
   }
@@ -251,7 +230,7 @@ async function handleApi(req, res, url) {
     const total = Number(project.metadata?.duration || 15);
     const window = Math.min(22, total);
     const sceneStarts = await detectSceneStarts(project.source, total, window);
-    const candidates = selectHighlightStarts(sceneStarts, total, window);
+    const candidates = chooseHighlightStarts(sceneStarts, total, window);
     project.analysisEvidence = { selector: sceneStarts.length ? 'scene-aligned-diverse-window-selection' : 'diverse-uniform-window-selection', sceneCandidates: sceneStarts.length, windowSeconds: window, candidateStarts: candidates };
     project.clips = [];
     for (let index = 0; index < candidates.length; index += 1) {

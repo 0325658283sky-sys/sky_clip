@@ -9,11 +9,12 @@ const feedback = await request(`/api/projects/${project.id}/clip-feedback`, { me
 const captions = (clip.captions || []).slice(0, 2).map(item => ({ ...item, text: item.text }));
 await request(`/api/projects/${project.id}/captions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ captions }) });
 const template = await request('/api/templates', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'E2E 검증 템플릿', aspectRatio: '9:16', captionStyle: { position: 'bottom', fontSize: 30, color: '#ffffff' } }) });
-const edit = { title: clip.title, segments: [{ start: 0, end: Math.min(3, clip.duration || 3) }], layers: [{ id: 'e2e-title', type: 'text', role: 'title', text: clip.title, position: 'top', fontSize: 42, color: '#ffffff', shadow: true }], captionStyle: { position: 'bottom', fontSize: 28, color: '#ffffff' }, templateId: template.id, effects: ['contrast'], tool: 'e2e' };
+const exportEnd = Math.min(3, clip.duration || 3); const splitAt = Math.max(0.4, Number((exportEnd / 2).toFixed(2)));
+const edit = { title: clip.title, segments: [{ start: 0, end: splitAt }, { start: splitAt, end: exportEnd }], layers: [{ id: 'e2e-title', type: 'text', role: 'title', text: clip.title, position: 'top', fontSize: 42, color: '#ffffff', shadow: true }], captionStyle: { position: 'bottom', fontSize: 28, color: '#ffffff' }, templateId: template.id, effects: ['contrast'], tool: 'e2e' };
 await request(`/api/projects/${project.id}/edit`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(edit) });
 const trackState = await request(`/api/projects/${project.id}/tracks`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ tracks: [{ id: 'main-video', name: '메인 영상', kind: 'video' }, { id: 'captions', name: '자막', kind: 'caption' }], transitions: [{ from: 'main-video', to: 'captions', type: 'fade', duration: 0.25 }] }) });
 const reloaded = await request(`/api/projects/${project.id}`);
-const persistedEdit = reloaded.edit?.templateId === template.id && reloaded.edit?.segments?.length === 1 && reloaded.edit?.layers?.length === 1 && reloaded.edit?.tracks?.length === 2 && trackState.transitions?.[0]?.type === 'fade';
+const persistedEdit = reloaded.edit?.templateId === template.id && reloaded.edit?.segments?.length === 2 && reloaded.edit?.layers?.length === 1 && reloaded.edit?.tracks?.length === 2 && trackState.transitions?.[0]?.type === 'fade';
 if (!persistedEdit) throw new Error('편집 상태 재진입 검증에 실패했습니다.');
 const exported = await request(`/api/projects/${project.id}/export`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ burnCaptions: true }) });
 const download = await fetch(new URL(exported.downloadUrl, base));

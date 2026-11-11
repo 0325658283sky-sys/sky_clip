@@ -124,11 +124,12 @@ async function extractClip(sourcePath, projectId, index, start, end, selectionMe
   return { id: `${projectId}-${index}`, start, end, duration, title, score, scoreType: '음성·장면·의미·자막 결합 휴리스틱', metrics: { ...audio, ...signals }, scoreBreakdown, captions: ready.captions, ready: !ready.fallback, aspectRatio: ready.fallback ? 'source' : '9:16', previewUrl: `/media/${basename(ready.path)}`, sourcePreviewUrl: `/media/${basename(clipPath)}`, thumbnailUrl: `/media/${basename(thumbPath)}` };
 }
 
-async function renderSegments(sourcePath, projectId, segments) {
+async function renderSegments(sourcePath, projectId, segments, transitions = []) {
   const files = [];
+  const fadeTransition = transitions.find(item => item?.type === 'fade'); const fadeDuration = Math.max(0.1, Math.min(1, Number(fadeTransition?.duration) || 0.25));
   for (let index = 0; index < segments.length; index += 1) {
     const segment = segments[index]; const start = Math.max(0, Number(segment.start) || 0); const duration = Math.max(0.1, (Number(segment.end) || start + 0.1) - start); const output = join(uploadRoot, `${projectId}-segment-${index + 1}.mp4`);
-    await execFile('ffmpeg', ['-y', '-ss', String(start), '-i', sourcePath, '-t', String(duration), '-c:v', 'libx264', '-preset', 'veryfast', '-c:a', 'aac', '-movflags', '+faststart', output], { windowsHide: true, timeoutMs: 180000 }); files.push(output);
+    const args = ['-y', '-ss', String(start), '-i', sourcePath, '-t', String(duration)]; if (fadeTransition) { const videoFilters = []; const audioFilters = []; if (index > 0) { videoFilters.push(`fade=t=in:st=0:d=${fadeDuration}`); audioFilters.push(`afade=t=in:st=0:d=${fadeDuration}`); } if (index < segments.length - 1 && duration > fadeDuration) { videoFilters.push(`fade=t=out:st=${Math.max(0, duration - fadeDuration)}:d=${fadeDuration}`); audioFilters.push(`afade=t=out:st=${Math.max(0, duration - fadeDuration)}:d=${fadeDuration}`); } if (videoFilters.length) args.push('-vf', videoFilters.join(',')); if (audioFilters.length) args.push('-af', audioFilters.join(',')); } args.push('-c:v', 'libx264', '-preset', 'veryfast', '-c:a', 'aac', '-movflags', '+faststart', output); await execFile('ffmpeg', args, { windowsHide: true, timeoutMs: 180000 }); files.push(output);
   }
   const listPath = join(uploadRoot, `${projectId}-segments.txt`); await writeFile(listPath, files.map(file => `file '${file.replaceAll("'", "'\\''")}'`).join('\n'), 'utf8');
   const combined = join(uploadRoot, `${projectId}-segments.mp4`); await execFile('ffmpeg', ['-y', '-f', 'concat', '-safe', '0', '-i', listPath, '-c', 'copy', '-movflags', '+faststart', combined], { windowsHide: true, timeoutMs: 180000 }); return combined;
@@ -269,7 +270,7 @@ async function handleApi(req, res, url) {
     let source = project.previewPath || project.source; if (!source) throw new Error('내보낼 영상이 없습니다.');
     const segments = Array.isArray(project.edit?.segments) ? project.edit.segments.filter(item => Number(item.end) > Number(item.start)) : [];
     const hasSegmentSequence = segments.length > 1;
-    if (hasSegmentSequence) source = await renderSegments(source, project.id, segments);
+    if (hasSegmentSequence) source = await renderSegments(source, project.id, segments, project.edit?.transitions || []);
     const output = join(uploadRoot, `${project.id}-export.mp4`); project.exportProgress = 25; await writeFile(projectPath, JSON.stringify(project, null, 2));
     const start = hasSegmentSequence ? 0 : Math.max(0, Number(project.edit?.start ?? 0));
     const duration = hasSegmentSequence ? null : project.edit?.end ? Math.max(0.1, Number(project.edit.end) - start) : null;

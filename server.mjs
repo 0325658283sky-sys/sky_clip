@@ -102,6 +102,13 @@ function buildHighlightSignals(captions, duration, selectionMeta = {}) {
   return { lexicalDiversity: Number(lexicalDiversity.toFixed(3)), captionCoverage: Number(captionCoverage.toFixed(3)), sceneScore, reactionScore, semanticSignal: Number(semanticSignal.toFixed(3)), noisePenalty: Number(noisePenalty.toFixed(3)), selectionReason: selectionMeta.sceneAligned ? '장면 변화·음성 반응·의미 단서가 함께 감지된 구간' : '음성·자막·의미 단서·길이 지표가 안정적인 구간' };
 }
 
+function inferTone(captions, reactionScore = 0) {
+  const text = captions.map(item => String(item.text || '')).join(' ').toLowerCase();
+  const scores = { '유쾌·재미': /(웃|재밌|ㅋㅋ|하하|웃음)/g, '신남·하이프': /(대박|미쳤|최고|가자|와)/g, '감동·따뜻': /(감동|고마|사랑|따뜻|행복)/g, '잔잔·힐링': /(편안|힐링|조용|평온|잔잔)/g, '충격·반전': /(충격|헐|소름|반전|놀랍)/g, '긴장·몰입': /(긴장|위험|주의|결국|왜)/g, '사이다·통쾌': /(통쾌|시원|해결|성공|이겼)/g, '진지·묵직': /(중요|진지|문제|의미|생각)/g };
+  const ranked = Object.entries(scores).map(([tone, pattern]) => [tone, (text.match(pattern) || []).length]).sort((a, b) => b[1] - a[1]);
+  return ranked[0][1] ? ranked[0][0] : reactionScore >= 0.45 ? '신남·하이프' : '진지·묵직';
+}
+
 function correctCaptionSet(captions) {
   const corrected = []; let previous = '';
   for (const item of Array.isArray(captions) ? captions : []) {
@@ -129,7 +136,7 @@ async function extractClip(sourcePath, projectId, index, start, end, selectionMe
   const scoreBreakdown = { speechCoverage: audio.speechCoverage, silenceEvents: audio.silenceEvents, durationFit: Number(durationFit.toFixed(3)), hook: Math.round((speech * 0.4 + signals.reactionScore * 0.22 + signals.sceneScore * 0.2 + signals.semanticSignal * 0.18) * 100), topic: Math.round((signals.captionCoverage * 0.42 + signals.lexicalDiversity * 0.28 + signals.semanticSignal * 0.3) * 100), flow: Math.round((1 - Math.min(1, (audio.silenceEvents || 0) / 8)) * 100), immersion: Math.round((speech * 0.42 + signals.sceneScore * 0.22 + signals.reactionScore * 0.18 + signals.semanticSignal * 0.18) * 100), ending: Math.round((durationFit * 0.45 + signals.captionCoverage * 0.3 + signals.semanticSignal * 0.25) * 100), evidence: ['실제 오디오 무음 구간', 'FFmpeg 장면 변화 후보', '자막 커버리지·어휘 다양성', '문장 완결·핵심 단서·어휘 다양성', signals.reactionScore > 0 ? '음성 반응 표현' : '음성 반응 표현 미검출'], signals };
   const score = audio.score == null ? null : Math.round(scoreValue * 100);
   const title = generateClipTitle(ready.captions || [], index);
-  return { id: `${projectId}-${index}`, start, end, duration, title, titleSource: 'generated', score, scoreType: '음성·장면·의미·자막 결합 휴리스틱', metrics: { ...audio, ...signals }, scoreBreakdown, captions: ready.captions, ready: !ready.fallback, aspectRatio: ready.fallback ? 'source' : '9:16', previewUrl: `/media/${basename(ready.path)}`, sourcePreviewUrl: `/media/${basename(clipPath)}`, thumbnailUrl: `/media/${basename(thumbPath)}` };
+  return { id: `${projectId}-${index}`, start, end, duration, title, titleSource: 'generated', score, tone: inferTone(ready.captions || [], signals.reactionScore), scoreType: '음성·장면·의미·자막 결합 휴리스틱', metrics: { ...audio, ...signals }, scoreBreakdown, captions: ready.captions, ready: !ready.fallback, aspectRatio: ready.fallback ? 'source' : '9:16', previewUrl: `/media/${basename(ready.path)}`, sourcePreviewUrl: `/media/${basename(clipPath)}`, thumbnailUrl: `/media/${basename(thumbPath)}` };
 }
 
 async function renderSegments(sourcePath, projectId, segments, transitions = []) {

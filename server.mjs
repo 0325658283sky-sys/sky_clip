@@ -265,6 +265,18 @@ async function handleApi(req, res, url) {
     project.status = 'completed'; project.progress = 100;
     await writeFile(projectPath, JSON.stringify(project, null, 2)); json(res, 200, project); return true;
   }
+  const promptClipMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/prompt-clips$/);
+  if (req.method === 'POST' && promptClipMatch) {
+    const projectPath = join(dataRoot, `${promptClipMatch[1]}.json`); const project = JSON.parse(await readFile(projectPath, 'utf8'));
+    const payload = JSON.parse((await readBody(req, 256 * 1024)).toString('utf8') || '{}'); const prompt = String(payload.prompt || '').trim().replace(/\s+/g, ' ').slice(0, 120);
+    if (prompt.length < 2) { json(res, 422, { ok: false, error: '찾고 싶은 장면을 두 글자 이상 입력하세요.' }); return true; }
+    const tokens = [...new Set(prompt.toLowerCase().split(/[^0-9a-z가-힣]+/i).filter(token => token.length >= 2))];
+    const candidates = (project.clips || []).map(clip => { const transcript = (clip.captions || []).map(item => item.text || '').join(' ').toLowerCase(); return { clip, matches: tokens.reduce((count, token) => count + (transcript.includes(token) ? 1 : 0), 0) }; }).sort((a, b) => b.matches - a.matches || Number(b.clip.score || 0) - Number(a.clip.score || 0));
+    const source = candidates[0]?.clip; if (!source) { json(res, 422, { ok: false, error: '프롬프트로 만들 수 있는 분석 클립이 없습니다.' }); return true; }
+    const index = `prompt-${randomUUID()}`; const created = await extractClip(project.source, project.id, index, Number(source.start) || 0, Number(source.end) || (Number(source.start) || 0) + Number(source.duration || 15), { prompt, promptMatches: candidates[0].matches });
+    created.title = `${prompt.slice(0, 42)} · 추천 장면`; created.titleSource = 'prompt'; created.prompt = prompt; created.promptMatches = candidates[0].matches;
+    project.clips = [created, ...(project.clips || [])]; project.selectedClipId = created.id; project.previewUrl = created.previewUrl; project.previewPath = join(uploadRoot, basename(created.previewUrl)); project.captions = created.captions || []; project.title = created.title; project.updatedAt = new Date().toISOString(); await writeFile(projectPath, JSON.stringify(project, null, 2)); json(res, 201, { ok: true, clip: created, matchedTokens: tokens, exactMatches: candidates[0].matches }); return true;
+  }
   const exportMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/export$/);
   const selectMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/select$/);
   if (req.method === 'POST' && selectMatch) {

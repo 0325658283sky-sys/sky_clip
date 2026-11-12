@@ -4,7 +4,7 @@ const projects = await request('/api/projects');
 const project = (projects.projects || []).find(item => item.status === 'completed' && item.clips?.length);
 if (!project) throw new Error('완료된 프로젝트가 없습니다.');
 const promptCreated = await request(`/api/projects/${project.id}/prompt-clips`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ prompt: 'E2E 검증 장면' }) });
-if (!promptCreated.clip?.id || !promptCreated.clip?.previewUrl || !promptCreated.clip?.sourcePreviewUrl) throw new Error('프롬프트 기반 실제 클립 생성 검증에 실패했습니다.');
+if (!promptCreated.clip?.id || !promptCreated.clip?.previewUrl || !promptCreated.clip?.sourcePreviewUrl || !promptCreated.clip?.tone) throw new Error('프롬프트 기반 실제 클립 생성 또는 톤 분류 검증에 실패했습니다.');
 const clip = project.clips[0];
 await request(`/api/projects/${project.id}/select`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ clipId: clip.id }) });
 const renamedTitle = 'E2E 제목 저장 검증';
@@ -32,6 +32,6 @@ if (!persistedEdit) throw new Error('편집 상태 재진입 검증에 실패했
 const exported = await request(`/api/projects/${project.id}/export`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ burnCaptions: true }) });
 const download = await fetch(new URL(exported.downloadUrl, base));
 const afterExport = await request(`/api/projects/${project.id}`);
-const result = { projectId: project.id, selectedClipId: clip.id, promptClipId: promptCreated.clip.id, feedback: feedback.feedback, titleSaved, persistedEdit, exportSize: `${afterExport.exportMetadata?.width}x${afterExport.exportMetadata?.height}`, tracks: reloaded.edit?.tracks?.length || 0, transitions: reloaded.edit?.transitions?.length || 0, templateId: template.id, exportUrl: exported.downloadUrl, downloadStatus: download.status, downloadBytes: Number(download.headers.get('content-length') || 0) };
+const result = { projectId: project.id, selectedClipId: clip.id, promptClipId: promptCreated.clip.id, promptTone: promptCreated.clip.tone, feedback: feedback.feedback, titleSaved, persistedEdit, exportSize: `${afterExport.exportMetadata?.width}x${afterExport.exportMetadata?.height}`, tracks: reloaded.edit?.tracks?.length || 0, transitions: reloaded.edit?.transitions?.length || 0, templateId: template.id, exportUrl: exported.downloadUrl, downloadStatus: download.status, downloadBytes: Number(download.headers.get('content-length') || 0) };
 console.log(JSON.stringify(result, null, 2));
 if (!download.ok || result.downloadBytes <= 0) process.exitCode = 1;
